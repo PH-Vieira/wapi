@@ -1,4 +1,4 @@
 /.env.local
 /auth
-/front-end
+/front-end/node_modules
 /node_modules
