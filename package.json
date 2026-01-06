@@ -1,0 +1,30 @@
+{
+  "name": "wapi",
+  "version": "1.0.0",
+  "description": "whatsapp-api-using-baileys",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "swagger": "node ./swagger.js",
+    "start": "npx nodemon ./index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "cors": "^2.8.5",
+    "qrcode-terminal": "^0.12.0",
+    "ssh2": "^1.17.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "tailwindcss": "^4.1.18"
+  },
+  "type": "module",
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "pino": "^10.1.0",
+    "swagger-autogen": "^2.23.7"
+  }
+}

@@ -1,0 +1,4 @@
+/.env.local
+/auth
+/front-end
+/node_modules
