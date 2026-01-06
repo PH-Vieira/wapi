@@ -7,8 +7,10 @@ import fs from 'fs'
 export class WAManager {
     constructor() {
         this.sessions = new Map()
+        this.sessionInfo = new Map()
         this.logger = pino({ level: process.env.LOG_LEVEL || 'info' })
         this.baseAuthDir = path.resolve(process.env.WA_AUTH_DIR || './auth')
+        this.manualDisconnect = new Set()
         if (!fs.existsSync(this.baseAuthDir)) fs.mkdirSync(this.baseAuthDir, { recursive: true })
         this.insecureTried = new Set()
         this.createSession('default')
@@ -71,6 +73,14 @@ export class WAManager {
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
 
+            const info = {
+                connection,
+                hasQR: !!qr,
+                lastCode: this._extractDisconnectCode(lastDisconnect?.error),
+                updatedAt: Date.now()
+            }
+            this.sessionInfo.set(sessionId, info)
+
             if (qr) {
                 if (printQRInTerminal) QRCode.generate(qr, { small: true });
                 if (typeof this.onQR === 'function') this.onQR(sessionId, qr);
@@ -83,9 +93,9 @@ export class WAManager {
             }
 
             if (connection === 'close') {
-                const err = lastDisconnect?.error;
-                const code = this._extractDisconnectCode(err);
-                const shouldReconnect = code !== DisconnectReason.loggedOut;
+                const err = lastDisconnect?.error
+                const code = this._extractDisconnectCode(err)
+                const shouldReconnect = code !== DisconnectReason.loggedOut && !this.manualDisconnect.has(sessionId)
 
                 const isCertIssuerError =
                     err?.code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' ||
@@ -107,6 +117,7 @@ export class WAManager {
                 } else {
                     this.sessions.delete(sessionId);
                     this.logger.info({ sessionId }, 'Sessão removida após logout');
+                    this.manualDisconnect.delete(sessionId)
                 }
             }
         });
@@ -124,6 +135,36 @@ export class WAManager {
         });
 
         return sock;
+    }
+
+    /**
+     * Desconecta a sessão mantendo credenciais
+     * @param {string} sessionId
+     */
+    async disconnect(sessionId) {
+        this.manualDisconnect.add(sessionId)
+        const sock = this.sessions.get(sessionId)
+        if (!sock) {
+            this.logger.warn({ sessionId }, 'disconnect: sessão não encontrada')
+            return false
+        }
+        
+        try {
+            if (sock.ws && sock.ws.readyState === 1) {
+                sock.ws.close()
+            }
+            if (typeof sock.end === 'function') {
+                await sock.end()
+            }
+        } catch (err) {
+            this.logger.error({ sessionId, err }, 'Erro ao desconectar')
+        } finally {
+            this.sessions.delete(sessionId)
+            this.sessionInfo.delete(sessionId)
+            this.insecureTried.delete(sessionId)
+            this.logger.info({ sessionId }, 'Sessão desconectada')
+        }
+        return true
     }
 
     /**
@@ -155,6 +196,14 @@ export class WAManager {
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
 
+            const info = {
+                connection,
+                hasQR: !!qr,
+                lastCode: this._extractDisconnectCode(lastDisconnect?.error),
+                updatedAt: Date.now()
+            }
+            this.sessionInfo.set(sessionId, info)
+
             if (qr) {
                 if (printQRInTerminal) QRCode.generate(qr, { small: true });
                 if (typeof this.onQR === 'function') this.onQR(sessionId, qr);
@@ -170,7 +219,7 @@ export class WAManager {
             if (connection === 'close') {
                 const err = lastDisconnect?.error;
                 const code = this._extractDisconnectCode(err);
-                const shouldReconnect = code !== DisconnectReason.loggedOut;
+                const shouldReconnect = code !== DisconnectReason.loggedOut && !this.manualDisconnect.has(sessionId)
 
                 this.logger.warn({ sessionId, code, shouldReconnect, err }, '[TLS-insecure] Conexão fechada');
 
@@ -181,10 +230,32 @@ export class WAManager {
                     delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
                     this.insecureTried.delete(sessionId);
                     this.logger.info({ sessionId }, 'Sessão removida após logout (modo inseguro)');
+                    this.manualDisconnect.delete(sessionId)
                 }
             }
         });
 
         return sock;
+    }
+
+    isConnected(sessionId) {
+        const info = this.sessionInfo.get(sessionId)
+        if (info?.connection === 'open') return true
+
+        const sock = this.sessions.get(sessionId)
+        if (!sock) return false
+
+        const hasUser = !!sock.user && !!sock.user.id
+        const wsOpen = !!sock.ws && sock.ws.readyState === 1
+
+        return hasUser || wsOpen
+    }
+
+    getSessionInfo(sessionId) {
+        return JSON.stringify({
+            id: sessionId,
+            connected: this.isConnected(sessionId),
+            info: this.sessionInfo.get(sessionId) || null
+        })
     }
 }
