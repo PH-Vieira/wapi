@@ -3,17 +3,19 @@ import QRCode from 'qrcode-terminal'
 import pino from 'pino'
 import path from 'path'
 import fs from 'fs'
+import NodeCache from 'node-cache'
 
 export class WAManager {
     constructor() {
         this.sessions = new Map()
         this.sessionInfo = new Map()
-        this.logger = pino({ level: process.env.LOG_LEVEL || 'info' })
+        this.logger = pino({ level: 'info' })
         this.baseAuthDir = path.resolve(process.env.WA_AUTH_DIR || './auth')
         this.manualDisconnect = new Set()
         if (!fs.existsSync(this.baseAuthDir)) fs.mkdirSync(this.baseAuthDir, { recursive: true })
         this.insecureTried = new Set()
         this.createSession('default')
+        this.groupCache = new NodeCache()
     }
 
     static getInstance() {
@@ -29,6 +31,16 @@ export class WAManager {
         } else {
             this.sessions.set(sessionId)
             console.log(`[DEBUG] new session ${sessionId} created`)
+        }
+    }
+
+    clearAuth(sessionId) {
+        const authDir = path.join(this.baseAuthDir, `session-${sessionId}`)
+        try {
+            fs.rmSync(authDir, { recursive: true, force: true })
+            this.logger.warn({ sessionId }, 'Auth apagada com sucesso')
+        } catch (err) {
+            this.logger.error({ sessionId, err }, 'Erro ao apagar auth')
         }
     }
 
@@ -51,8 +63,14 @@ export class WAManager {
        * @param {{ printQRInTerminal?: boolean }} opts
        */
     async conectar(sessionId, { printQRInTerminal = true } = {}) {
+        console.log(this.manualDisconnect)
+
         if (!this.sessions.has(sessionId)) this.createSession(sessionId)
+
         const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // change useMultiFileAuthState for self made function some day
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
         const sock = makeWASocket({
@@ -64,6 +82,8 @@ export class WAManager {
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             },
             markOnlineOnConnect: true,
+            cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
+            shouldSyncHistoryMessage: () => false
         });
 
         this.sessions.set(sessionId, sock);
@@ -72,6 +92,7 @@ export class WAManager {
 
         sock.ev.on('connection.update', (update) => {
             const { connection, lastDisconnect, qr } = update;
+            this.logger.info({ sessionId }, 'conectando')
 
             const info = {
                 connection,
@@ -102,7 +123,7 @@ export class WAManager {
                     /unable to get local issuer certificate/i.test(err?.message || '') ||
                     /UNABLE_TO_GET_ISSUER_CERT_LOCALLY/i.test(String(code || ''));
 
-                this.logger.warn({ sessionId, code, shouldReconnect, isCertIssuerError }, 'Conexão fechada (modo seguro)');
+                this.logger.warn({ sessionId, code, shouldReconnect, isCertIssuerError }, 'Conexao fechada (modo seguro)');
 
                 if (shouldReconnect) {
                     if (isCertIssuerError && !this.insecureTried.has(sessionId)) {
@@ -112,11 +133,13 @@ export class WAManager {
 
                         setTimeout(() => this.conectarInseguro(sessionId, { printQRInTerminal }), 1000);
                     } else {
+                        this.clearAuth(sessionId)
+
                         setTimeout(() => this.conectar(sessionId, { printQRInTerminal }), 2000);
                     }
                 } else {
-                    this.sessions.delete(sessionId);
-                    this.logger.info({ sessionId }, 'Sessão removida após logout');
+                    sessionId === 'default' ? '' : this.sessions.delete(sessionId);
+                    this.logger.info({ sessionId }, 'Sessao removida apos logout');
                     this.manualDisconnect.delete(sessionId)
                 }
             }
@@ -127,10 +150,10 @@ export class WAManager {
                 const isProtocol = !!m.message?.protocolMessage;
                 const isFromMe = !!m.key.fromMe;
                 const isNotify = event.type === 'notify';
-                if (!isNotify || isProtocol || isFromMe) continue;
+                // if (!isNotify || isProtocol || isFromMe) continue;
 
                 const jid = m.key.remoteJid;
-                this.logger.debug({ sessionId, jid }, 'Mensagem recebida');
+                console.log(`[DEBUG] ${Object.keys(m)} | ${Object.keys(m.message)} | ${m.message.conversation}`)
             }
         });
 
@@ -143,27 +166,29 @@ export class WAManager {
      */
     async disconnect(sessionId) {
         this.manualDisconnect.add(sessionId)
+        console.log(this.manualDisconnect)
+
         const sock = this.sessions.get(sessionId)
         if (!sock) {
             this.logger.warn({ sessionId }, 'disconnect: sessão não encontrada')
             return false
         }
-        
+
         try {
-            if (sock.ws && sock.ws.readyState === 1) {
-                sock.ws.close()
+            if (typeof sock.logout === 'function') {
+                await sock.logout()
             }
-            if (typeof sock.end === 'function') {
-                await sock.end()
-            }
+
+            sock.ws?.terminate?.()
         } catch (err) {
             this.logger.error({ sessionId, err }, 'Erro ao desconectar')
         } finally {
-            this.sessions.delete(sessionId)
+            // this.sessions.delete(sessionId)
             this.sessionInfo.delete(sessionId)
             this.insecureTried.delete(sessionId)
             this.logger.info({ sessionId }, 'Sessão desconectada')
         }
+
         return true
     }
 
@@ -186,7 +211,8 @@ export class WAManager {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             },
-            markOnlineOnConnect: false,
+            markOnlineOnConnect: true,
+            cachedGroupMetadata: async (jid) => this.groupCache.get(jid)
         });
 
         this.sessions.set(sessionId, sock);

@@ -2,6 +2,7 @@
 import express from 'express'
 import cors from 'cors'
 import { WAManager } from './models/WAManager.js'
+import QRCode from 'qrcode'
 // --------------------------------------------- //
 
 const PORT = 3000
@@ -45,9 +46,7 @@ app.post('/sessions', (req, res) => {
 
 app.get('/sessions/:sessionId', (req, res) => {
     const { sessionId } = req.params
-    if (!sessionId) return
     const { manager } = req.app.locals
-    if (!manager) return
     console.log(`[INFO] GET /session/${sessionId} 200 OK`)
     res.send(manager.getSessionInfo(sessionId))
 })
@@ -90,9 +89,30 @@ app.delete('/sessions/:sessionId', async (req, res) => {
     }
 })
 
+app.get('/sessions/:sessionId/qr', (req, res) => {
+    const { sessionId } = req.params
+    console.log(`[DEBUG] checking qr code for ${sessionId ? sessionId : ''}`)
+    const { manager } = req.app.locals
+
+    const qr = manager.qrCodes.get(sessionId)
+
+    if (!qr) return res.status(404).json({ qr: null })
+
+    res.json({ qr })
+})
+
 // ------------- Start API --------------- //
 console.log(`[INFO] Criando manager`)
 const manager = new WAManager()
+manager.qrCodes = new Map()
+manager.onQR = async (sessionId, qr) => {
+    const image = await QRCode.toDataURL(qr, {
+        errorCorrectionLevel: 'H',
+        scale: 8,
+        margin: 1
+    })
+    manager.qrCodes.set(sessionId, image)
+}
 app.locals.manager = manager
 app.listen(PORT, () => {
     console.log(`[INFO] API rodando em http://localhost:${PORT}`)
