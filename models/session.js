@@ -19,7 +19,33 @@ export class Session {
         if (!fs.existsSync(this.baseAuthDir)) fs.mkdirSync(this.baseAuthDir, { recursive: true })
         this.manualDisconnect = new Set()
         this.insecureTried = new Set()
-        this.groupCache = new NodeCache()
+        this.groupCache = new NodeCache({
+            stdTTL: 60,             // TTL padrão em segundos (0 = nunca expira)
+            checkperiod: 120,       // frequência da coleta de expirados (segundos)
+            useClones: true,        // clona valores ao set/get (evita mutação externa)
+            deleteOnExpire: true,   // remove chaves automaticamente quando expiram
+            maxKeys: -1,            // sem limite; defina para proteger memória
+        })
+    }
+
+    /**
+     * Teste pego de https://github.com/WhiskeySockets/Baileys/issues/1692#issuecomment-3226590794
+     * @param {*} jid 
+     * @param {*} senderPn 
+     * @returns 
+     */
+    _resolveJidLid(jid, senderPn) {
+        const hadLid = typeof jid === 'string' && /@lid/i.test(jid)
+        let resolved = jid
+        let senderNumber = null
+
+        if (hadLid && senderPn) {
+            resolved = senderPn
+            senderNumber = String(senderPn).replace(/\\D+/g, '')
+        } else if (typeof jid === 'string' && /@s\\.whatsapp\\.net$/.test(jid)) {
+            senderNumber = jid.replace(/@.*/, '')
+        }
+        return { resolved, hadLid, senderNumber }
     }
 
     _extractDisconnectCode(err) {
@@ -41,7 +67,6 @@ export class Session {
        * @param {{ printQRInTerminal?: boolean }} opts
        */
     async conectar(sessionId, { printQRInTerminal = true } = {}) {
-
         const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         // change useMultiFileAuthState for self made function some day
@@ -249,60 +274,41 @@ export class Session {
             }
         })
 
+        this.groupCache.on('set', (key, val) => {
+
+        })
+
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
+                this.logger.info({ sessionId }, m)
                 const isProtocol = !!m.message?.protocolMessage;
                 const isFromMe = !!m.key.fromMe;
                 const isNotify = event.type === 'notify';
-                // if (!isNotify || isProtocol || isFromMe) continue;
-
-                const chatJid = m.key.remoteJid;
-                const isGroup = chatJid?.endsWith('@g.us');
-                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
-
-                const getTextOrReaction = (msg) => {
-                    if (msg?.conversation) return msg.conversation;
-                    if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
-                    if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
-                    if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
-                    if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
-                    if (msg?.reactionMessage) {
-                        const r = msg.reactionMessage;
-                        const targetId = r?.key?.id ?? '[n/a]';
-                        return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
-                    }
-                    return '[sem texto]';
-                };
-                const text = getTextOrReaction(m.message);
-
-                const pushName = m.pushName || null;
-
-                // cache de metadata de grupo
-                let chatName = null;
-                if (isGroup) {
-                    let groupMeta = this.groupCache.get(chatJid);
-                    if (!groupMeta) {
-                        groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
-                        if (groupMeta) this.groupCache.set(chatJid, groupMeta);
-                    }
-                    chatName = groupMeta?.subject || chatJid;
-                } else {
-                    chatName = chatJid;
+                // const groupMetadata = await sock.groupMetadata(m.key.remoteJid)
+                // this.logger.info(groupMetadata)
+                const details = {
+                    messageId: m.key.id,
+                    messageReplyTo: m.key.remoteJid,
+                    senderJid: m.key.participant,
+                    sernderPn: m.key.participantAlt,
+                    messageTimestamp: m.messageTimestamp,
+                    senderPushName: m.pushName,
+                    messageText: m.message?.conversation || m.message?.extendedTextMessage?.text || '',
+                    messageKeys: m.message || {},
+                    isFromMe: isFromMe
+                }
+                if ( !this.groupCache.get(details.messageReplyTo) ) {
+                    const groupMetadata = await sock.groupMetadata(details.messageReplyTo)
+                    this.groupCache.set(groupMetadata.id, groupMetadata, 300)
                 }
 
-                const showNumberIfUser = (jid) => (
-                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
-                );
+                if (!isNotify || isProtocol) continue;
 
-                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
+                if (typeof this.onMessage === 'function') {
+                    this.onMessage(sessionId, details)
+                }
 
-                console.log(
-                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
-                    `chatJid=${chatJid} chatName=${chatName} ` +
-                    `fromJid=${senderJid} from=${fromLabel} ` +
-                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
-                    `text=${text}`
-                );
+                this.logger.info({ sessionId, details }, '[MESSAGE RECEIVED]')
             }
         });
 

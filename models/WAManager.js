@@ -33,6 +33,10 @@ export class WAManager {
         session.onError = (id, err) => {
             this.emitter.emit('error', { session: id, error: err })
         }
+        
+        session.onMessage = (id, detail) => {
+            this.emitter.emit('message', { sessionId: id, ...detail })
+        }
 
         this.sessions.set(sessionId, session)
 
