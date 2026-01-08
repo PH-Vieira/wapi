@@ -63,8 +63,10 @@ export class WAManager {
        * @param {{ printQRInTerminal?: boolean }} opts
        */
     async conectar(sessionId, { printQRInTerminal = true } = {}) {
-        console.log(this.manualDisconnect)
-
+        if ( this.isShuttingDown ) {
+            this.logger.info({ sessionId }, 'Manager em shutdown')
+            return
+        }
         if (!this.sessions.has(sessionId)) this.createSession(sessionId)
 
         const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
@@ -283,5 +285,33 @@ export class WAManager {
             connected: this.isConnected(sessionId),
             info: this.sessionInfo.get(sessionId) || null
         })
+    }
+
+    async shutdown() {
+        this.logger.info('Desligando..')
+
+        this.isShuttingDown = true
+
+        for (const [sessionId, sock] of this.sessions.entries()) {
+            try {
+                this.manualDisconnect.add(sessionId)
+
+                if (typeof sock.logout === 'function') {
+                    await sock.logout()
+                }
+
+                sock.ws?.terminate?.()
+            } catch (err) {
+                this.logger.error({ sessionId, err }, 'Erro ao desligar')
+            }
+        }
+
+        this.sessions.clear()
+        this.sessionInfo.clear()
+        this.insecureTried?.clear?.()
+        this.manualDisconnect?.clear?.()
+        this.qrCodes?.clear?.()
+
+        this.logger.info('WAManager finalizado')
     }
 }

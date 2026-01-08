@@ -23,6 +23,41 @@ app.get('/', (req, res) => {
     res.send('Bolsonaro 2026!')
 })
 
+app.get('/manager', (req, res) => {
+    console.log(`[INFO] GET /manager`)
+    const { manager } = req.app.locals
+    if ( !manager ) {
+        return res.json({
+            running: false,
+            reason: "no_manager"
+        })
+    }
+})
+
+app.get('/manager/start', (req, res) => {
+    const { _manager } = req.app.locals
+    if (_manager) {
+        res.json({
+            "answer": 1
+        })
+    }
+    const manager = new WAManager()
+    manager.qrCodes = new Map()
+    manager.onQR = async (sessionId, qr) => {
+        const image = await QRCode.toDataURL(qr, {
+            errorCorrectionLevel: 'H',
+            scale: 8,
+            margin: 1
+        })
+        manager.qrCodes.set(sessionId, image)
+    }
+    app.locals.manager = manager
+})
+
+app.get('/manager/stop', (req, res) => {
+
+})
+
 app.get('/sessions', (req, res) => {
     const { manager } = req.app.locals
 
@@ -102,20 +137,20 @@ app.get('/sessions/:sessionId/qr', (req, res) => {
 })
 
 // ------------- Start API --------------- //
-console.log(`[INFO] Criando manager`)
-const manager = new WAManager()
-manager.qrCodes = new Map()
-manager.onQR = async (sessionId, qr) => {
-    const image = await QRCode.toDataURL(qr, {
-        errorCorrectionLevel: 'H',
-        scale: 8,
-        margin: 1
-    })
-    manager.qrCodes.set(sessionId, image)
-}
-app.locals.manager = manager
+// console.log(`[INFO] Criando manager`)
+// const manager = new WAManager()
+// manager.qrCodes = new Map()
+// manager.onQR = async (sessionId, qr) => {
+//     const image = await QRCode.toDataURL(qr, {
+//         errorCorrectionLevel: 'H',
+//         scale: 8,
+//         margin: 1
+//     })
+//     manager.qrCodes.set(sessionId, image)
+// }
+// app.locals.manager = manager
 app.listen(PORT, () => {
     console.log(`[INFO] API rodando em http://localhost:${PORT}`)
-    console.log(`[DEBUG] sessões: ${[...manager.sessions.keys()]}`)
-    console.log(`[DEBUG] info on session default: ${manager.getSessionInfo('default')}`)
+    // console.log(`[DEBUG] sessões: ${[...manager.sessions.keys()]}`)
+    // console.log(`[DEBUG] info on session default: ${manager.getSessionInfo('default')}`)
 })

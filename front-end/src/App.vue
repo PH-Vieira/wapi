@@ -1,6 +1,9 @@
 <script setup>
 import axios from 'axios'
 import { onMounted, ref, ssrContextKey, watch } from 'vue'
+import { useManagerStore } from './stores/manager'
+
+const managerStore = useManagerStore()
 
 const health = ref('')
 const qr = ref(null)
@@ -31,6 +34,11 @@ watch(sessions, (newSessions, oldSessions) => {
     }
   })
 })
+
+function checkManager() {
+  console.log('[APP] Checking manager')
+  managerStore.getManager()
+}
 
 async function fetchQR(sessionId) {
   try {
@@ -65,12 +73,6 @@ async function check_sessions() {
     res?.data ? sessions.value = res.data.ids : ''
   }
 }
-
-onMounted(() => {
-  health_check()
-  check_sessions()
-  fetchQR('default')
-})
 
 async function create_session(sessionId) {
   if (new_session_name.value === '') { console.log(new_session_name.value); return }
@@ -125,12 +127,39 @@ async function disconnect(sessionId) {
   }
 }
 
+onMounted(() => {
+  health_check()
+  checkManager()
+  // check_sessions()
+  // fetchQR('default')
+})
+
 </script>
 
 <template>
-  <div class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2">
-    <div class="flex justify-center items-center gap-2">
-      <button type="button" @click="health_check"
+  <div class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 border overflow-hidden">
+    <div class="flex justify-center items-center gap-2 w-11/12 h-1/12 border">
+      <table class="border-separate text-center">
+        <thead class="bg-slate-600">
+          <tr>
+            <th class="border rounded p-1">{{ managerStore.manager.status }}</th>
+            <th class="border rounded p-1">Health</th>
+            <th class="border rounded p-1">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="bg-slate-700">
+          <tr>
+            <td class="border rounded p-1">Manager</td>
+            <td class="border rounded p-1">{{ managerStore.manager.status }}</td>
+            <td class="border rounded p-1">
+              <button @click="managerStore.createManager()" v-if="managerStore.manager.status != 'running'" class="border rounded px-1 mx-1 bg-emerald-500 cursor-pointer" type="button">Start</button>
+              <button v-if="managerStore.manager.status == 'running'" class="border rounded px-1 mx-1 bg-red-500 cursor-pointer" type="button">Stop</button>
+              <button @click="checkManager()" class="border rounded px-1 mx-1 bg-sky-500 cursor-pointer" type="button">Check</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- <button type="button" @click="health_check"
         class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer"
         :class="health != '' ? (health == 'ok' ? 'bg-emerald-600' : 'bg-rose-600') : 'bg-slate-600'">Health
         check</button>
@@ -141,9 +170,9 @@ async function disconnect(sessionId) {
         class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer bg-slate-600">Create
         session</button>
       <input v-model="new_session_name" type="text" class="border rounded-md px-2 py-1 bg-slate-600"
-        placeholder="Session Name">
+        placeholder="Session Name"> -->
     </div>
-    <div class="flex flex-col gap-2 items-end">
+    <div class="flex flex-col gap-2 items-end w-11/12 h-7/12 border">
       <div v-for="session in sessions" class="flex gap-2">
         <button @click="get_session_info(session)"
           class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer max-h-12"
@@ -157,6 +186,9 @@ async function disconnect(sessionId) {
           v-if="!!sessionsInfo[session]?.connected"
           class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer bg-slate-600 max-h-12">Disconectar</button>
       </div>
+    </div>
+    <div class="flex w-11/12 h-1/12 border">
+      sei la oq
     </div>
   </div>
 </template>
