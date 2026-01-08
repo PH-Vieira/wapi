@@ -21,7 +21,8 @@
     "ssh2": "^1.17.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "ws": "^8.19.0"
   },
   "type": "module",
   "devDependencies": {

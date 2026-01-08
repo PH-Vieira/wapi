@@ -1,7 +1,13 @@
 <script setup>
-import axios from 'axios'
-import { onMounted, ref, ssrContextKey, watch } from 'vue'
+import { useWebSocket } from './composables/useWebSocket'
 import { useManagerStore } from './stores/manager'
+import { onMounted, ref, watch } from 'vue'
+import axios from 'axios'
+
+const { isOpen, lastMsg, send } = useWebSocket('ws://localhost:3000')
+// function criarSessao() {
+//   send({ type: 'createSession', sessionId: 'abc' })
+// }
 
 const managerStore = useManagerStore()
 
@@ -129,7 +135,10 @@ async function disconnect(sessionId) {
 
 onMounted(() => {
   health_check()
-  checkManager()
+  // checkManager()
+  // setInterval(() => {
+  //   checkManager()
+  // }, 3000);
   // check_sessions()
   // fetchQR('default')
 })
@@ -137,7 +146,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 border overflow-hidden">
+  <div
+    class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 border overflow-hidden">
     <div class="flex justify-center items-center gap-2 w-11/12 h-1/12 border">
       <table class="border-separate text-center">
         <thead class="bg-slate-600">
@@ -152,9 +162,12 @@ onMounted(() => {
             <td class="border rounded p-1">Manager</td>
             <td class="border rounded p-1">{{ managerStore.manager.status }}</td>
             <td class="border rounded p-1">
-              <button @click="managerStore.createManager()" v-if="managerStore.manager.status != 'running'" class="border rounded px-1 mx-1 bg-emerald-500 cursor-pointer" type="button">Start</button>
-              <button v-if="managerStore.manager.status == 'running'" class="border rounded px-1 mx-1 bg-red-500 cursor-pointer" type="button">Stop</button>
-              <button @click="checkManager()" class="border rounded px-1 mx-1 bg-sky-500 cursor-pointer" type="button">Check</button>
+              <button @click="managerStore.createManager()" v-if="managerStore.manager.status != 'running'"
+                class="border rounded px-1 mx-1 bg-emerald-500 cursor-pointer" type="button">Start</button>
+              <button @click="managerStore.stopManager()" v-if="managerStore.manager.status == 'running'"
+                class="border rounded px-1 mx-1 bg-red-500 cursor-pointer" type="button">Stop</button>
+              <button @click="checkManager()" class="border rounded px-1 mx-1 bg-sky-500 cursor-pointer"
+                type="button">Check</button>
             </td>
           </tr>
         </tbody>
@@ -178,17 +191,18 @@ onMounted(() => {
           class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer max-h-12"
           :class="sessionsInfo[session]?.connected ? 'bg-emerald-600' : 'bg-red-600'">{{
             session }}</button>
-        <button @click="connect(session)"
-          v-if="!sessionsInfo[session]?.connected"
+        <button @click="connect(session)" v-if="!sessionsInfo[session]?.connected"
           class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer bg-slate-600 max-h-12">Conectar</button>
         <img v-if="qr && sessionsInfo[session]?.info?.hasQR" :src="qr" class="w-96 h-96 rounded">
-        <button @click="disconnect(session)"
-          v-if="!!sessionsInfo[session]?.connected"
+        <button @click="disconnect(session)" v-if="!!sessionsInfo[session]?.connected"
           class="hover:border-sky-500 border rounded-md px-2 py-1 transition-colors cursor-pointer bg-slate-600 max-h-12">Disconectar</button>
       </div>
+      <img v-if="lastMsg?.qr" class="w-96 rounded-xl" :src="lastMsg.qr">
     </div>
-    <div class="flex w-11/12 h-1/12 border">
-      sei la oq
+    <div class="flex flex-col w-11/12 h-1/12 border">
+      <p>WS: {{ isOpen ? 'conectado' : 'desconectado' }}</p>
+      <pre v-if="lastMsg">{{ lastMsg }}</pre>
+      <button @click="criarSessao">Criar sessão</button>
     </div>
   </div>
 </template>

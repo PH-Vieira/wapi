@@ -28,7 +28,7 @@ export const useManagerStore = defineStore('manager', {
                 console.log('no manager, creating..')
                 const { data } = await axios.get('http://localhost:3000/manager/start')
                 if ( !data ) return
-                console.log(`[STORE] ${data.answer}`)
+                console.log(`[STORE] createManager() -> ${data.answer}`)
                 return data
             } catch (err) {
                 console.log(`[ERROR] ${err}`)
@@ -36,5 +36,14 @@ export const useManagerStore = defineStore('manager', {
                 this.getManager()
             }
         },
+        async stopManager() {
+            try {
+                const { data } = await axios.get('http://localhost:3000/manager/stop')
+                if ( !data ) return
+                console.log(`[STORE] stopManager() -> ${data}`)
+            } catch (err) {
+                
+            }
+        }
     }
 })
