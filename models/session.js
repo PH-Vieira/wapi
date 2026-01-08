@@ -123,68 +123,57 @@ export class Session {
                 const isProtocol = !!m.message?.protocolMessage;
                 const isFromMe = !!m.key.fromMe;
                 const isNotify = event.type === 'notify';
-
-                // opcional: ignore mensagens de protocolo / do próprio número / não-notify
                 // if (!isNotify || isProtocol || isFromMe) continue;
 
-                const chatJid = m.key.remoteJid;              // chat (contato ou grupo)
+                const chatJid = m.key.remoteJid;
                 const isGroup = chatJid?.endsWith('@g.us');
-                const senderJid = isGroup ? m.key.participant : m.key.remoteJid; // quem falou
-                const deviceJid = m.key?.id; // não é o device, é o message id (apenas exemplo)
+                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
 
-                // função util para extrair texto de diferentes tipos
-                const getText = (msg) => (
-                    msg?.conversation ??
-                    msg?.extendedTextMessage?.text ??
-                    msg?.imageMessage?.caption ??
-                    msg?.videoMessage?.caption ??
-                    msg?.buttonsMessage?.contentText ??
-                    msg?.listMessage?.description ??
-                    msg?.documentMessage?.caption ??
-                    null
+                const getTextOrReaction = (msg) => {
+                    if (msg?.conversation) return msg.conversation;
+                    if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+                    if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
+                    if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
+                    if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
+                    if (msg?.reactionMessage) {
+                        const r = msg.reactionMessage;
+                        const targetId = r?.key?.id ?? '[n/a]';
+                        return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
+                    }
+                    return '[sem texto]';
+                };
+                const text = getTextOrReaction(m.message);
+
+                const pushName = m.pushName || null;
+
+                // cache de metadata de grupo
+                let chatName = null;
+                if (isGroup) {
+                    let groupMeta = this.groupCache.get(chatJid);
+                    if (!groupMeta) {
+                        groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
+                        if (groupMeta) this.groupCache.set(chatJid, groupMeta);
+                    }
+                    chatName = groupMeta?.subject || chatJid;
+                } else {
+                    chatName = chatJid;
+                }
+
+                const showNumberIfUser = (jid) => (
+                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
                 );
 
-                const text = getText(m.message) ?? '[sem texto]';
-
-                // util: converter JID para número sem sufixo
-                const jidToNumber = (jid) => (jid ? jid.replace(/@.+$/, '') : '');
-
-                // tentar resolver nomes pelo cache do Baileys (quando disponível)
-                // sock.contacts pode não existir em versões recentes; use store se estiver usando 'makeInMemoryStore'
-                let senderName = m.pushName || null; // pushName vem do cabeçalho da mensagem
-                let chatName = null;
-
-                try {
-                    // buscar infos mais completas, se precisar
-                    if (isGroup) {
-                        const groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
-                        chatName = groupMeta?.subject || chatJid;
-                        // tentar achar nome do participante (não é garantido)
-                        const p = groupMeta?.participants?.find(p => p.id === senderJid);
-                        senderName = senderName || p?.admin ? `${p?.id} (admin)` : null;
-                    } else {
-                        // contatos: em algumas versões dá para consultar perfil
-                        // isso pode gerar chamadas extras; use com parcimônia
-                        const profile = await sock.profilePictureUrl(chatJid, 'image').catch(() => null);
-                        // não retorna nome, apenas foto; manter pushName
-                        chatName = chatJid;
-                    }
-                } catch (_e) { /* silencie erros de metadata */ }
+                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
 
                 console.log(
-                    `[MESSAGE RECEIVED] ` +
-                    `chat=${isGroup ? 'group' : 'direct'} ` +
-                    `chatJid=${chatJid} ` +
-                    `chatName=${chatName ?? '[n/a]'} ` +
-                    `fromJid=${senderJid} ` +
-                    `fromNumber=${jidToNumber(senderJid)} ` +
-                    `fromName=${senderName ?? '[n/a]'} ` +
-                    `type=${event.type} ` +
-                    `keys=${Object.keys(m.message || {})} ` +
+                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
+                    `chatJid=${chatJid} chatName=${chatName} ` +
+                    `fromJid=${senderJid} from=${fromLabel} ` +
+                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
                     `text=${text}`
                 );
             }
-        })
+        });
 
         this.status = 'running'
 
@@ -260,74 +249,62 @@ export class Session {
             }
         })
 
-
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
                 const isProtocol = !!m.message?.protocolMessage;
                 const isFromMe = !!m.key.fromMe;
                 const isNotify = event.type === 'notify';
-
-                // opcional: ignore mensagens de protocolo / do próprio número / não-notify
                 // if (!isNotify || isProtocol || isFromMe) continue;
 
-                const chatJid = m.key.remoteJid;              // chat (contato ou grupo)
+                const chatJid = m.key.remoteJid;
                 const isGroup = chatJid?.endsWith('@g.us');
-                const senderJid = isGroup ? m.key.participant : m.key.remoteJid; // quem falou
-                const deviceJid = m.key?.id; // não é o device, é o message id (apenas exemplo)
+                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
 
-                // função util para extrair texto de diferentes tipos
-                const getText = (msg) => (
-                    msg?.conversation ??
-                    msg?.extendedTextMessage?.text ??
-                    msg?.imageMessage?.caption ??
-                    msg?.videoMessage?.caption ??
-                    msg?.buttonsMessage?.contentText ??
-                    msg?.listMessage?.description ??
-                    msg?.documentMessage?.caption ??
-                    null
+                const getTextOrReaction = (msg) => {
+                    if (msg?.conversation) return msg.conversation;
+                    if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+                    if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
+                    if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
+                    if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
+                    if (msg?.reactionMessage) {
+                        const r = msg.reactionMessage;
+                        const targetId = r?.key?.id ?? '[n/a]';
+                        return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
+                    }
+                    return '[sem texto]';
+                };
+                const text = getTextOrReaction(m.message);
+
+                const pushName = m.pushName || null;
+
+                // cache de metadata de grupo
+                let chatName = null;
+                if (isGroup) {
+                    let groupMeta = this.groupCache.get(chatJid);
+                    if (!groupMeta) {
+                        groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
+                        if (groupMeta) this.groupCache.set(chatJid, groupMeta);
+                    }
+                    chatName = groupMeta?.subject || chatJid;
+                } else {
+                    chatName = chatJid;
+                }
+
+                const showNumberIfUser = (jid) => (
+                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
                 );
 
-                const text = getText(m.message) ?? '[sem texto]';
-
-                // util: converter JID para número sem sufixo
-                const jidToNumber = (jid) => (jid ? jid.replace(/@.+$/, '') : '');
-
-                // tentar resolver nomes pelo cache do Baileys (quando disponível)
-                // sock.contacts pode não existir em versões recentes; use store se estiver usando 'makeInMemoryStore'
-                let senderName = m.pushName || null; // pushName vem do cabeçalho da mensagem
-                let chatName = null;
-
-                try {
-                    // buscar infos mais completas, se precisar
-                    if (isGroup) {
-                        const groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
-                        chatName = groupMeta?.subject || chatJid;
-                        // tentar achar nome do participante (não é garantido)
-                        const p = groupMeta?.participants?.find(p => p.id === senderJid);
-                        senderName = senderName || p?.admin ? `${p?.id} (admin)` : null;
-                    } else {
-                        // contatos: em algumas versões dá para consultar perfil
-                        // isso pode gerar chamadas extras; use com parcimônia
-                        const profile = await sock.profilePictureUrl(chatJid, 'image').catch(() => null);
-                        // não retorna nome, apenas foto; manter pushName
-                        chatName = chatJid;
-                    }
-                } catch (_e) { /* silencie erros de metadata */ }
+                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
 
                 console.log(
-                    `[MESSAGE RECEIVED] ` +
-                    `chat=${isGroup ? 'group' : 'direct'} ` +
-                    `chatJid=${chatJid} ` +
-                    `chatName=${chatName ?? '[n/a]'} ` +
-                    `fromJid=${senderJid} ` +
-                    `fromNumber=${jidToNumber(senderJid)} ` +
-                    `fromName=${senderName ?? '[n/a]'} ` +
-                    `type=${event.type} ` +
-                    `keys=${Object.keys(m.message || {})} ` +
+                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
+                    `chatJid=${chatJid} chatName=${chatName} ` +
+                    `fromJid=${senderJid} from=${fromLabel} ` +
+                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
                     `text=${text}`
                 );
             }
-        })
+        });
 
         this.sock = sock
         return sock
