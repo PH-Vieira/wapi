@@ -1,0 +1,28 @@
+{
+    "messages": [
+        {
+            "key": {
+                "remoteJid": "112233445566778899@g.us",
+                "fromMe": false,
+                "id": "3E208W859F0C2C22873F63",
+                "participant": "112233445566778@lid",
+                "participantAlt": "5511123654789@s.whatsapp.net",
+                "addressingMode": "lid"
+            },
+            "messageTimestamp": 1122334455,
+            "pushName": "­nome do contato(nao e o nome que vc salva imbecil)",
+            "broadcast": false,
+            "message": {
+                "conversation": "texto da mensagem(vai vir vazio se for audio, reacao, imagem, resposta, etc)",
+                "messageContextInfo": {
+                    "messageSecret": "W2K9OkepgVawOlLW3V38Y6a6Ro67VPj14r6w/iBaq2k=",
+                    "limitSharingV2": {
+                        "trigger": "UNKNOWN",
+                        "initiatedByMe": false
+                    }
+                }
+            }
+        }
+    ],
+    "type": "notify"
+}

@@ -1,0 +1,41 @@
+{
+    "id": "112233445566778899@g.us",
+    "addressingMode": "lid",
+    "subject": "nome do grupo",
+    "subjectOwner": "112233445566778@lid",
+    "subjectOwnerPn": "5511123456789@s.whatsapp.net",
+    "subjectTime": 1234567890,
+    "size": 2,
+    "creation": 1234567890,
+    "owner": "112233445566778@lid",
+    "ownerPn": "5511123456789@s.whatsapp.net",
+    "owner_country_code": "BR",
+    "desc": "descricao do grupo",
+    "descId": "11A8AB299D640580",
+    "descOwner": "112233445566778@lid",
+    "descOwnerPn": "5511123978456@s.whatsapp.net",
+    "descTime": 1263846546,
+    "restrict": true,
+    "announce": false,
+    "isCommunity": false,
+    "isCommunityAnnounce": false,
+    "joinApprovalMode": false,
+    "memberAddMode": true,
+    "participants": [
+        {
+            "id": "112233445566778@lid",
+            "phoneNumber": "5511123456789@s.whatsapp.net",
+            "admin": null
+        },
+        {
+            "id": "112233445566778@lid",
+            "phoneNumber": "5511123456789@s.whatsapp.net",
+            "admin": "superadmin"
+        },
+        {
+            "id": "112233445566778@lid",
+            "phoneNumber": "5511123456789@s.whatsapp.net",
+            "admin": "admin"
+        }
+    ]
+}
