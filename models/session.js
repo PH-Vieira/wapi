@@ -116,7 +116,6 @@ export class Session {
                         setTimeout(() => this.conectar(sessionId, { printQRInTerminal }), 2000)
                     }
                 } else {
-                    sessionId === 'default' ? '' : this.sessions.delete(sessionId)
                     this.logger.info({ sessionId }, 'Sessao removida apos logout')
                     this.manualDisconnect.delete(sessionId)
                 }
@@ -152,16 +151,29 @@ export class Session {
                 const pushName = m.pushName || null;
 
                 // cache de metadata de grupo
-                let chatName = null;
+                let chatName = chatJid
                 if (isGroup) {
-                    let groupMeta = this.groupCache.get(chatJid);
-                    if (!groupMeta) {
-                        groupMeta = await sock.groupMetadata(chatJid).catch(() => null);
-                        if (groupMeta) this.groupCache.set(chatJid, groupMeta);
+                    try {
+                        let groupMeta = this.groupCache.get(chatJid);
+
+                        if (!groupMeta) {
+                            // Só pede metadata se o socket estiver aberto e pronto
+                            // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
+                            groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
+                                this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
+                                return null;
+                            });
+
+                            if (groupMeta) {
+                                this.groupCache.set(chatJid, groupMeta);
+                            }
+                        }
+
+                        // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
+                        chatName = groupMeta?.subject || chatJid;
+                    } catch (e) {
+                        chatName = chatJid;
                     }
-                    chatName = groupMeta?.subject || chatJid;
-                } else {
-                    chatName = chatJid;
                 }
 
                 const showNumberIfUser = (jid) => (
@@ -260,35 +272,71 @@ export class Session {
 
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
-                this.logger.info({ sessionId }, m)
                 const isProtocol = !!m.message?.protocolMessage;
                 const isFromMe = !!m.key.fromMe;
                 const isNotify = event.type === 'notify';
-                // const groupMetadata = await sock.groupMetadata(m.key.remoteJid)
-                // this.logger.info(groupMetadata)
-                const details = {
-                    messageId: m.key.id,
-                    messageReplyTo: m.key.remoteJid,
-                    senderJid: m.key.participant,
-                    sernderPn: m.key.participantAlt,
-                    messageTimestamp: m.messageTimestamp,
-                    senderPushName: m.pushName,
-                    messageText: m.message?.conversation || m.message?.extendedTextMessage?.text || '',
-                    messageKeys: m.message || {},
-                    isFromMe: isFromMe
-                }
-                if (!this.groupCache.get(details.messageReplyTo)) {
-                    const groupMetadata = await sock.groupMetadata(details.messageReplyTo)
-                    this.groupCache.set(groupMetadata.id, groupMetadata, 300)
+                // if (!isNotify || isProtocol || isFromMe) continue;
+
+                const chatJid = m.key.remoteJid;
+                const isGroup = chatJid?.endsWith('@g.us');
+                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
+
+                const getTextOrReaction = (msg) => {
+                    if (msg?.conversation) return msg.conversation;
+                    if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+                    if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
+                    if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
+                    if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
+                    if (msg?.reactionMessage) {
+                        const r = msg.reactionMessage;
+                        const targetId = r?.key?.id ?? '[n/a]';
+                        return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
+                    }
+                    return '[sem texto]';
+                };
+                const text = getTextOrReaction(m.message);
+
+                const pushName = m.pushName || null;
+
+                // cache de metadata de grupo
+                let chatName = chatJid
+                if (isGroup) {
+                    try {
+                        let groupMeta = this.groupCache.get(chatJid);
+
+                        if (!groupMeta) {
+                            // Só pede metadata se o socket estiver aberto e pronto
+                            // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
+                            groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
+                                this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
+                                return null;
+                            });
+
+                            if (groupMeta) {
+                                this.groupCache.set(chatJid, groupMeta);
+                            }
+                        }
+
+                        // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
+                        chatName = groupMeta?.subject || chatJid;
+                    } catch (e) {
+                        chatName = chatJid;
+                    }
                 }
 
-                if (!isNotify || isProtocol) continue;
+                const showNumberIfUser = (jid) => (
+                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
+                );
 
-                if (typeof this.onMessage === 'function') {
-                    this.onMessage(sessionId, details)
-                }
+                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
 
-                this.logger.info({ sessionId, details }, '[MESSAGE RECEIVED]')
+                console.log(
+                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
+                    `chatJid=${chatJid} chatName=${chatName} ` +
+                    `fromJid=${senderJid} from=${fromLabel} ` +
+                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
+                    `text=${text}`
+                );
             }
         });
 

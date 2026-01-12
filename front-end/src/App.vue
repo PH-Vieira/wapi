@@ -5,6 +5,7 @@ import axios from 'axios'
 import Workers from './components/workers.vue'
 import Config from './components/config.vue'
 import { useManagerStore } from './stores/manager'
+import { useCatsStore } from './stores/cats'
 
 const { isOpen, lastMsg, send } = useWebSocket('ws://localhost:3000')
 // function criarSessao() {
@@ -16,6 +17,7 @@ const chatBox = ref(HTMLElement)
 const health = ref('')
 const main_component = ref('Workers')
 const managerStore = useManagerStore()
+const catsStore = useCatsStore()
 
 watch(lastMsg, async (newMsg, _lastMsg) => {
   msgHist.value.push(newMsg)
@@ -60,11 +62,15 @@ onMounted(() => {
               'sticker' : msg.messageKeys?.imageMessage ? 'imagem' : msg.messageText}` }}</p>
         </div>
       </div> -->
-      <img v-if="lastMsg?.qr" class="w-96" :src="lastMsg.qr">
+      <!-- <img v-if="lastMsg?.qr" class="w-96" :src="lastMsg.qr"> -->
     </div>
     <div class="flex flex-row gap-2 justify-center items-center w-11/12 h-1/12 border">
-      <button @click="main_component = 'Workers'" class="border px-2 py-1 rounded-md bg-emerald-700 transition-colors hover:bg-emerald-500 cursor-pointer" type="button">Workers</button>
-      <button @click="main_component = 'Config'" class="border px-2 py-1 rounded-md bg-emerald-700 transition-colors hover:bg-emerald-500 cursor-pointer" type="button">Config</button>
+      <button @click="main_component = 'Workers'"
+        class="border px-2 py-1 rounded-md bg-emerald-700 transition-colors hover:bg-emerald-500 cursor-pointer"
+        type="button">Workers</button>
+      <button @click="main_component = 'Config'"
+        class="border px-2 py-1 rounded-md bg-emerald-700 transition-colors hover:bg-emerald-500 cursor-pointer"
+        type="button">Config</button>
     </div>
   </div>
 </template>

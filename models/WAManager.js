@@ -13,41 +13,39 @@ export class WAManager {
     }
 
     async createSession(sessionId) {
-        setTimeout(() => {
-            if (this.sessions.has(sessionId)) { return this.sessions.get(sessionId) }
+        if (this.sessions.has(sessionId)) { return this.sessions.get(sessionId) }
 
-            const session = new Session(sessionId)
+        const session = new Session(sessionId)
 
-            session.onQR = async (id, qr) => {
-                this.emitter.emit('qr', { sessionId: id, qr })
-                const image = await QRCode.toDataURL(qr, {
-                    errorCorrectionLevel: 'H',
-                    scale: 8,
-                    margin: 2
-                })
-                this.qrCodes.set(sessionId, image)
-            }
+        session.onQR = async (id, qr) => {
+            this.emitter.emit('qr', { sessionId: id, qr })
+            const image = await QRCode.toDataURL(qr, {
+                errorCorrectionLevel: 'H',
+                scale: 8,
+                margin: 2
+            })
+            this.qrCodes.set(sessionId, image)
+        }
 
-            session.onConnectionUpdate = (id, info) => {
-                this._recomputeStatus()
-                this.emitter.emit('connection.update', { sessionId: id, ...info })
-            }
+        session.onConnectionUpdate = (id, info) => {
+            this._recomputeStatus()
+            this.emitter.emit('connection.update', { sessionId: id, ...info })
+        }
 
-            session.onError = (id, err) => {
-                this.emitter.emit('error', { session: id, error: err })
-            }
+        session.onError = (id, err) => {
+            this.emitter.emit('error', { session: id, error: err })
+        }
 
-            session.onMessage = (id, detail) => {
-                this.emitter.emit('message', { sessionId: id, ...detail })
-            }
+        session.onMessage = (id, detail) => {
+            this.emitter.emit('message', { sessionId: id, ...detail })
+        }
 
-            this.sessions.set(sessionId, session)
+        this.sessions.set(sessionId, session)
 
-            this.emitter.emit('sessionCreated', { sessionId })
+        this.emitter.emit('sessionCreated', { sessionId })
 
-            console.log(`[INFO] WAManager: sessao ${sessionId} criada`)
-            return session
-        }, 3000);
+        console.log(`[INFO] WAManager: sessao ${sessionId} criada`)
+        return session
     }
 
     async connectSession(sessionId) {
@@ -77,20 +75,33 @@ export class WAManager {
 
     destroySession(sessionId) { }
 
-    getSession(sessionId) { }
+    getSession(sessionId) {
+        const session = this.sessions.get(sessionId);
+        if (!session) return null;
+
+        const info = session.sessionInfo?.get(sessionId) || {};
+
+        return {
+            id: sessionId,
+            status: info.connection || 'unknown',
+            qrCode: this.qrCodes.get(sessionId) || null,
+            lastUpdate: info.updatedAt || null,
+            isSocketOpen: info.connection === 'open'
+        };
+    }
+
 
     listSessions() {
         return Array.from(this.sessions).map(([id, session]) => {
             return {
                 id: id,
-                status: this.status,
-                connected: session.sock?.readyState === 1 || false,
+                status: session.sessionInfo?.get(id)?.connection || 'unknown',
                 qrCode: this.qrCodes.get(id) || null,
             }
         })
     }
 
-    getStatus() { return this.status }
+    getStatus(sessionId) { }
 
     destroyAllSessions() { }
 

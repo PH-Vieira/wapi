@@ -46,25 +46,46 @@ function broadcast(obj) {
 app.get('/', (req, res) => {
     console.log('[INFO] GET /')
     res.set('X-Created-By', 'amogus?')
-    res.send('ok')
+    return res.status(214)
 })
 
 app.get('/sessions', (req, res) => {
     console.log('[INFO] GET /sessions')
     const manager = WAManager.getInstance()
-    if ( !manager ) { return json.status(418).json({ error: 'missin manager' }) }
+    if (!manager) { return res.status(418).json({ error: 'missin manager' }) }
     const sessions = manager.listSessions()
-    return res.status(200).json(sessions)
+    return res.status(214).json(sessions)
 })
 
-app.post('/sessions', (req, res) => {
+app.post('/sessions', async (req, res) => {
     console.log('[INFO] POST /sessions')
     const sessionId = req.query.sessionId
-    if ( !sessionId ) { return json.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    if (!sessionId) { return res.status(417).json({ error: 'sessionId eh obrigatorio' }) }
     const manager = WAManager.getInstance()
-    if ( !manager ) { return json.status(418).json({ error: 'missin manager' }) }
-    manager.connectSession(sessionId)
-    return json.status(214).json({ message: 'connecting..' })
+    if (!manager) { return res.status(418).json({ error: 'missin manager' }) }
+    await manager.connectSession(sessionId)
+    return res.status(214).json({ message: 'connecting..' })
+})
+
+app.get('/sessions/:sessionId', (req, res) => {
+    const { sessionId } = req.params
+    const manager = WAManager.getInstance()
+    const sessionData = manager.getSession(sessionId)
+
+    if (!sessionData) {
+        return res.status(418).json({
+            sessionId,
+            error: `Sessão ${sessionId} não encontrada`
+        })
+    }
+
+    console.log(`[INFO] GET /sessions/${sessionId} - Status: ${sessionData.status}`)
+    
+    // O correto é passar UM único objeto combinando os dados
+    return res.status(214).json({
+        sessionId,
+        ...sessionData
+    })
 })
 
 // --------------------------------- //
