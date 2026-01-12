@@ -8,41 +8,46 @@ export class WAManager {
         this.sessions = new Map()
         this.emitter = new EventEmitter()
         this.qrCodes = new Map()
+
+        console.log('[INFO] WAManager: Manager criado')
     }
 
     async createSession(sessionId) {
-        if (this.sessions.has(sessionId)) { return this.sessions.get(sessionId) }
+        setTimeout(() => {
+            if (this.sessions.has(sessionId)) { return this.sessions.get(sessionId) }
 
-        const session = new Session(sessionId)
+            const session = new Session(sessionId)
 
-        session.onQR = async (id, qr) => {
-            this.emitter.emit('qr', { sessionId: id, qr })
-            const image = await QRCode.toDataURL(qr, {
-                errorCorrectionLevel: 'H',
-                scale: 8,
-                margin: 2
-            })
-            this.qrCodes.set(sessionId, image)
-        }
+            session.onQR = async (id, qr) => {
+                this.emitter.emit('qr', { sessionId: id, qr })
+                const image = await QRCode.toDataURL(qr, {
+                    errorCorrectionLevel: 'H',
+                    scale: 8,
+                    margin: 2
+                })
+                this.qrCodes.set(sessionId, image)
+            }
 
-        session.onConnectionUpdate = (id, info) => {
-            this._recomputeStatus()
-            this.emitter.emit('connection.update', { sessionId: id, ...info })
-        }
+            session.onConnectionUpdate = (id, info) => {
+                this._recomputeStatus()
+                this.emitter.emit('connection.update', { sessionId: id, ...info })
+            }
 
-        session.onError = (id, err) => {
-            this.emitter.emit('error', { session: id, error: err })
-        }
-        
-        session.onMessage = (id, detail) => {
-            this.emitter.emit('message', { sessionId: id, ...detail })
-        }
+            session.onError = (id, err) => {
+                this.emitter.emit('error', { session: id, error: err })
+            }
 
-        this.sessions.set(sessionId, session)
+            session.onMessage = (id, detail) => {
+                this.emitter.emit('message', { sessionId: id, ...detail })
+            }
 
-        this.emitter.emit('sessionCreated', { sessionId })
+            this.sessions.set(sessionId, session)
 
-        return session
+            this.emitter.emit('sessionCreated', { sessionId })
+
+            console.log(`[INFO] WAManager: sessao ${sessionId} criada`)
+            return session
+        }, 3000);
     }
 
     async connectSession(sessionId) {
@@ -50,7 +55,7 @@ export class WAManager {
         // await session.conectar(sessionId)
         // return session
         let session = this.sessions.get(sessionId)
-        if ( !session ) {
+        if (!session) {
             session = await this.createSession(sessionId)
         }
         await session.conectar(sessionId)
@@ -59,12 +64,12 @@ export class WAManager {
 
     _recomputeStatus() {
         let online = false
-        for ( const s of this.sessions.values() ) {
+        for (const s of this.sessions.values()) {
             const info = s.sessionInfo?.get(s.id)
-            if ( info?.connection === 'open' ) { online = true; break }
+            if (info?.connection === 'open') { online = true; break }
         }
-        const newStatus = online ? 'online' : ( this.sessions.size ? 'idle' : 'offline' )
-        if ( newStatus !== this.status ) {
+        const newStatus = online ? 'online' : (this.sessions.size ? 'idle' : 'offline')
+        if (newStatus !== this.status) {
             this.status = newStatus
             this.emitter.emit('statusChanged', { status: newStatus })
         }
@@ -74,7 +79,16 @@ export class WAManager {
 
     getSession(sessionId) { }
 
-    listSessions() { }
+    listSessions() {
+        return Array.from(this.sessions).map(([id, session]) => {
+            return {
+                id: id,
+                status: this.status,
+                connected: session.sock?.readyState === 1 || false,
+                qrCode: this.qrCodes.get(id) || null,
+            }
+        })
+    }
 
     getStatus() { return this.status }
 

@@ -49,11 +49,31 @@ app.get('/', (req, res) => {
     res.send('ok')
 })
 
-const manager = new WAManager()
-console.log('[DEBUG] manager criado')
+app.get('/sessions', (req, res) => {
+    console.log('[INFO] GET /sessions')
+    const manager = WAManager.getInstance()
+    if ( !manager ) { return json.status(418).json({ error: 'missin manager' }) }
+    const sessions = manager.listSessions()
+    return res.status(200).json(sessions)
+})
+
+app.post('/sessions', (req, res) => {
+    console.log('[INFO] POST /sessions')
+    const sessionId = req.query.sessionId
+    if ( !sessionId ) { return json.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    const manager = WAManager.getInstance()
+    if ( !manager ) { return json.status(418).json({ error: 'missin manager' }) }
+    manager.connectSession(sessionId)
+    return json.status(214).json({ message: 'connecting..' })
+})
+
+// --------------------------------- //
+
+const manager = WAManager.getInstance()
 app.locals.manager = manager
-manager.createSession('default')
-await manager.connectSession('default')
+await manager.createSession('default')
+await manager.createSession('default2')
+// await manager.connectSession('default')
 
 manager.emitter.on('qr', ({ sessionId }) => {
     const img = manager.qrCodes.get(sessionId);
