@@ -1,9 +1,10 @@
-import makeWASocket, { Browsers, DisconnectReason, makeCacheableSignalKeyStore, useMultiFileAuthState } from '@whiskeysockets/baileys'
-import NodeCache from 'node-cache'
+import makeWASocket, { Browsers, DisconnectReason, makeCacheableSignalKeyStore, useMultiFileAuthState, downloadMediaMessage } from '@whiskeysockets/baileys'
+import { EventEmitter } from 'events'
 import qrcode from 'qrcode-terminal'
+import NodeCache from 'node-cache'
+import fs from 'fs'
 import path from 'path'
 import pino from 'pino'
-import fs from 'fs'
 
 export class Session {
     /**
@@ -13,7 +14,10 @@ export class Session {
     constructor(sessionId) {
         this.id = sessionId
         this.sock = null
+        this.chats = new Map()
+        this.messages = new Map()
         this.sessionInfo = new Map()
+        this.emitter = new EventEmitter()
         this.logger = pino({ level: 'info' })
         this.baseAuthDir = path.resolve(process.env.WA_AUTH_DIR || './auth')
         if (!fs.existsSync(this.baseAuthDir)) fs.mkdirSync(this.baseAuthDir, { recursive: true })
@@ -46,11 +50,17 @@ export class Session {
        * @param {string} sessionId
        * @param {{ printQRInTerminal?: boolean }} opts
        */
-    async conectar(sessionId, { printQRInTerminal = true } = {}) {
+    async conectar(sessionId, { printQRInTerminal = true, insecure = false } = {}) {
+        this.sessionId = sessionId;
+        this.manualDisconnect.delete(sessionId);
+
+        if (insecure) {
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+            this.insecureTried.add(sessionId);
+            this.logger.warn({ sessionId }, '[TLS] Iniciando em modo INSEGURO');
+        }
+
         const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // change useMultiFileAuthState for self made function some day
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
         const sock = makeWASocket({
@@ -62,140 +72,181 @@ export class Session {
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             },
             markOnlineOnConnect: true,
-            cachedGroupMetadata: async (jid) => this.groupCache.get(jid),
-            shouldSyncHistoryMessage: () => false
+            shouldSyncHistoryMessage: () => false,
+            cachedGroupMetadata: async (jid) => this.groupCache.get(jid)
         });
 
+        this.sock = sock;
         sock.ev.on('creds.update', saveCreds);
 
-        sock.ev.on('connection.update', (update) => {
-            const { connection, lastDisconnect, qr } = update;
-            this.logger.warn({ sessionId }, 'conectando')
+        sock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update
+            const code = this._extractDisconnectCode(lastDisconnect?.error)
+            const errMessage = lastDisconnect?.error?.message || ''
 
-            const info = {
-                connection,
-                hasQR: !!qr,
-                lastCode: this._extractDisconnectCode(lastDisconnect?.error),
+            this.sessionInfo.set(sessionId, {
+                connection: connection || 'connecting',
                 updatedAt: Date.now()
-            }
-            this.sessionInfo.set(sessionId, info)
+            })
 
             if (qr) {
                 if (printQRInTerminal) qrcode.generate(qr, { small: true })
-                if (typeof this.onQR === 'function') this.onQR(sessionId, qr)
-                this.logger.warn({ sessionId }, 'QR disponível (modo seguro)')
+                this.emitter.emit('qr', { id: sessionId, qr })
             }
 
             if (connection === 'open') {
-                this.logger.warn({ sessionId }, 'Sessão conectada (modo seguro)')
+                this.logger.info({ sessionId }, 'Sessão conectada com sucesso')
                 this.insecureTried.delete(sessionId)
             }
 
             if (connection === 'close') {
-                const err = lastDisconnect?.error
-                const code = this._extractDisconnectCode(err)
-                const shouldReconnect = code !== DisconnectReason.loggedOut && !this.manualDisconnect.has(sessionId)
+                const errMessage = lastDisconnect?.error?.message || ''
+                const code = this._extractDisconnectCode(lastDisconnect?.error)
 
-                const isCertIssuerError =
-                    err?.code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY' ||
-                    /unable to get local issuer certificate/i.test(err?.message || '') ||
-                    /UNABLE_TO_GET_ISSUER_CERT_LOCALLY/i.test(String(code || ''))
+                const isRestarting = code === 515
 
-                this.logger.warn({ sessionId, code, shouldReconnect, isCertIssuerError }, 'Conexao fechada (modo seguro)')
+                if (isRestarting) {
+                    this.logger.info({ sessionId }, '[RESTART] Erro 515 detectado. Reconectando silenciosamente...')
+                    return setTimeout(() => this.conectar(sessionId, { insecure, printQRInTerminal }), 500)
+                }
+
+                const isCertError = /unable to get local issuer certificate/i.test(errMessage) ||
+                    errMessage.includes('CERT_LOCALLY')
+
+                if (isCertError && !insecure) {
+                    this.logger.warn({ sessionId }, '[TLS] Erro de certificado detectado. Reiniciando em modo inseguro...')
+
+                    this.sessionInfo.set(sessionId, { connection: 'connecting', updatedAt: Date.now() })
+
+                    return setTimeout(() => this.conectar(sessionId, { insecure: true, printQRInTerminal }), 1500)
+                }
+
+
+                const isFatal = code === DisconnectReason.loggedOut || code === 401
+                const shouldReconnect = !isFatal && !this.manualDisconnect.has(sessionId)
 
                 if (shouldReconnect) {
-                    if (isCertIssuerError && !this.insecureTried.has(sessionId)) {
-                        this.insecureTried.add(sessionId)
-                        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-                        this.logger.warn({ sessionId }, '[TLS] Tentando reconexão sem verificação de certificado…')
+                    this.sessionInfo.set(sessionId, { connection: 'connecting', updatedAt: Date.now() })
 
-                        setTimeout(() => this.conectarInseguro(sessionId, { printQRInTerminal }), 1000)
-                    } else {
-                        this.clearAuth(sessionId)
-
-                        setTimeout(() => this.conectar(sessionId, { printQRInTerminal }), 2000)
-                    }
+                    setTimeout(() => this.conectar(sessionId, { insecure, printQRInTerminal }), 3000)
                 } else {
-                    this.logger.info({ sessionId }, 'Sessao removida apos logout')
-                    this.manualDisconnect.delete(sessionId)
+                    if (code === 401) {
+                        await fs.promises.rm(authDir, { recursive: true, force: true }).catch(() => { })
+                    }
+
+                    this.sessionInfo.set(sessionId, { connection: 'close', updatedAt: Date.now() })
+                    this.emitter.emit('connection.update', { sessionId, connection: 'close' })
+
+                    sock.ev.removeAllListeners()
+                    this.sock = null
+                    if (insecure) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
                 }
             }
-        });
+
+        })
 
         sock.ev.on('messages.upsert', async (event) => {
+            // if (event.type !== 'notify') return
+
             for (const m of event.messages) {
-                const isProtocol = !!m.message?.protocolMessage;
-                const isFromMe = !!m.key.fromMe;
-                const isNotify = event.type === 'notify';
-                // if (!isNotify || isProtocol || isFromMe) continue;
-
                 const chatJid = m.key.remoteJid;
-                const isGroup = chatJid?.endsWith('@g.us');
-                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
+                if (!m.message) continue;
 
-                const getTextOrReaction = (msg) => {
-                    if (msg?.conversation) return msg.conversation;
-                    if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
-                    if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
-                    if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
-                    if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
-                    if (msg?.reactionMessage) {
-                        const r = msg.reactionMessage;
-                        const targetId = r?.key?.id ?? '[n/a]';
-                        return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
-                    }
-                    return '[sem texto]';
-                };
-                const text = getTextOrReaction(m.message);
+                const isSticky = !!m.message.stickerMessage;
+                const isImage = !!m.message.imageMessage;
+                let mediaData = null;
 
-                const pushName = m.pushName || null;
-
-                // cache de metadata de grupo
-                let chatName = chatJid
-                if (isGroup) {
+                if (isSticky || isImage) {
                     try {
-                        let groupMeta = this.groupCache.get(chatJid);
-
-                        if (!groupMeta) {
-                            // Só pede metadata se o socket estiver aberto e pronto
-                            // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
-                            groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
-                                this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
-                                return null;
-                            });
-
-                            if (groupMeta) {
-                                this.groupCache.set(chatJid, groupMeta);
+                        // O downloadMediaMessage precisa do objeto 'm' inteiro
+                        const buffer = await downloadMediaMessage(
+                            m,
+                            'buffer',
+                            {},
+                            {
+                                logger: console, // Opcional: ajuda a ver erros de rede no log
+                                reuploadRequest: sock.updateMediaMessage
                             }
-                        }
+                        );
 
-                        // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
-                        chatName = groupMeta?.subject || chatJid;
-                    } catch (e) {
-                        chatName = chatJid;
+                        if (buffer) {
+                            const mime = isSticky ? 'image/webp' : 'image/jpeg';
+                            mediaData = `data:${mime};base64,${buffer.toString('base64')}`;
+                            console.log(`[MEDIA] Sucesso ao baixar mídia da mensagem: ${m.key.id}`);
+                        }
+                    } catch (err) {
+                        console.error(`[MEDIA ERROR] Falha no download (ID: ${m.key.id}):`, err.message);
                     }
                 }
 
-                const showNumberIfUser = (jid) => (
-                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
-                );
+                const isGroup = chatJid.endsWith('@g.us')
+                let chatName = chatJid
 
-                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
+                if (isGroup) {
+                    let metadata = this.groupCache.get(chatJid)
+                    if (!metadata) {
+                        metadata = await sock?.groupMetadata(chatJid).catch(() => null)
+                        if (metadata) this.groupCache.set(chatJid, metadata)
+                    }
+                    chatName = metadata?.subject || chatJid
+                }
 
-                console.log(
-                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
-                    `chatJid=${chatJid} chatName=${chatName} ` +
-                    `fromJid=${senderJid} from=${fromLabel} ` +
-                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
-                    `text=${text}`
-                );
+                const novaMensagem = {
+                    id: m.key.id,
+                    chatJid,
+                    chatName,
+                    text: this.getTextOrReaction(m.message) || (isSticky ? '[figurinha]' : '[imagem]'),
+                    fromMe: m.key.fromMe,
+                    pushName: m.pushName || 'Contato',
+                    timestamp: m.messageTimestamp,
+                    url: mediaData,
+                    mimetype: isSticky ? 'image/webp' : (isImage ? 'image/jpeg' : null)
+                }
+
+                if (!this.messages.has(chatJid)) {
+                    this.messages.set(chatJid, [])
+                }
+
+                const jaExiste = this.messages.get(chatJid).some(msg => msg.id === novaMensagem.id)
+                if (!jaExiste) {
+                    this.messages.get(chatJid).push(novaMensagem)
+                    if (this.messages.get(chatJid).length > 50) {
+                        this.messages.get(chatJid).shift()
+                    }
+                }
+
+                this.emitter.emit('new_message', {
+                    sessionId: this.id,
+                    ...novaMensagem
+                })
             }
-        });
+        })
 
-        this.status = 'running'
+        sock.ev.on('groups.update', async (updates) => {
+            for (const update of updates) {
+                const metadata = await sock.groupMetadata(update.id).catch(() => null)
+                if (metadata) {
+                    this.groupCache.set(update.id, metadata)
+                    this.logger.info({ sessionId: this.id, group: metadata.subject }, 'Metadata de grupo atualizado')
+                }
+            }
+        })
 
-        this.sock = sock
-        return sock
+        return sock;
+    }
+
+    getTextOrReaction(msg) {
+        if (msg?.conversation) return msg.conversation;
+        if (msg?.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+        if (msg?.imageMessage?.caption) return msg.imageMessage.caption;
+        if (msg?.videoMessage?.caption) return msg.videoMessage.caption;
+        if (msg?.documentMessage?.caption) return msg.documentMessage.caption;
+        if (msg?.reactionMessage) {
+            const r = msg.reactionMessage;
+            const targetId = r?.key?.id ?? '[n/a]';
+            return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
+        }
+        return '[sem texto]';
     }
 
     /**
@@ -238,7 +289,7 @@ export class Session {
 
             if (qr) {
                 if (printQRInTerminal) qrcode.generate(qr, { small: true })
-                if (typeof this.onQR === 'function') this.onQR(sessionId, qr)
+                this.emitter.emit('qr', { id: this.sessionId, qr })
                 this.logger.info({ sessionId }, 'QR disponível (modo inseguro)')
             }
 
@@ -249,37 +300,68 @@ export class Session {
             }
 
             if (connection === 'close') {
-                const err = lastDisconnect?.error;
-                const code = this._extractDisconnectCode(err);
-                const shouldReconnect = code !== DisconnectReason.loggedOut && !this.manualDisconnect.has(sessionId)
+                const err = lastDisconnect?.error
+                const code = this._extractDisconnectCode(err)
+                const isLoggedOut = code === DisconnectReason.loggedOut || code === 401
+                const shouldReconnect = !isLoggedOut && !this.manualDisconnect.has(sessionId)
+
+                this.logger.warn({ sessionId, code, shouldReconnect, err }, '[TLS-insecure] Conexão fechada')
 
                 this.logger.warn({ sessionId, code, shouldReconnect, err }, '[TLS-insecure] Conexão fechada');
 
                 if (shouldReconnect) {
-                    setTimeout(() => this.conectarInseguro(sessionId, { printQRInTerminal }), 1500);
+                    this.sessionInfo.set(sessionId, { connection: 'close', updatedAt: Date.now() })
+                    setTimeout(() => this.conectarInseguro(sessionId, { printQRInTerminal }), 1500)
                 } else {
+                    if (code === 401) {
+                        this.logger.warn({ sessionId }, 'Credenciais inválidas (401). Limpando pasta auth...');
+                        const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
+                        fs.promises.rm(authDir, { recursive: true, force: true })
+                            .then(() => this.logger.info({ sessionId }, 'Pasta auth removida.'))
+                            .catch(e => this.logger.error('Erro ao remover pasta:', e));
+                    }
+
+                    this.sessionInfo.set(sessionId, {
+                        connection: 'close',
+                        updatedAt: Date.now()
+                    })
+
+                    if (typeof this.emitter?.emit === 'function') {
+                        this.emitter.emit('connection.update', { sessionId, connection: 'close' });
+                    }
+
+                    sock.ev.removeAllListeners('connection.update')
+                    sock.ev.removeAllListeners('creds.update')
+                    sock.ev.removeAllListeners('messages.upsert')
+
+                    this.sock = null
                     delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
                     this.insecureTried.delete(sessionId)
-                    this.logger.warn({ sessionId }, 'Sessão removida após logout (modo inseguro)')
                     this.manualDisconnect.delete(sessionId)
                 }
             }
-        })
-
-        this.groupCache.on('set', (key, val) => {
 
         })
+
+        // this.groupCache.on('set', (key, val) => {
+
+        // })
 
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
-                const isProtocol = !!m.message?.protocolMessage;
-                const isFromMe = !!m.key.fromMe;
-                const isNotify = event.type === 'notify';
-                // if (!isNotify || isProtocol || isFromMe) continue;
+                const messageType = Object.keys(m.message || {})[0]
+                const isProtocol = !!m.message?.protocolMessage
+                const isFromMe = !!m.key.fromMe
+                const isNotify = event.type === 'notify'
+                const isSticky = messageType === 'stickerMessage'
+                const isImage = messageType === 'imageMessage'
+                const pushName = m.pushName || null
+                if (isNotify) return
 
+                let mediaData = null
                 const chatJid = m.key.remoteJid;
-                const isGroup = chatJid?.endsWith('@g.us');
-                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid;
+                const isGroup = chatJid?.endsWith('@g.us')
+                const senderJid = isGroup ? (m.key.participant ?? m.participant ?? m.key.remoteJid) : m.key.remoteJid
 
                 const getTextOrReaction = (msg) => {
                     if (msg?.conversation) return msg.conversation;
@@ -293,52 +375,56 @@ export class Session {
                         return `[reaction] emoji=${r?.text ?? ''} targetKeyId=${targetId}`;
                     }
                     return '[sem texto]';
-                };
-                const text = getTextOrReaction(m.message);
+                }
+                const text = getTextOrReaction(m.message)
 
-                const pushName = m.pushName || null;
 
-                // cache de metadata de grupo
-                let chatName = chatJid
-                if (isGroup) {
-                    try {
-                        let groupMeta = this.groupCache.get(chatJid);
+                if (!this.messages.has(chatJid)) { this.messages.set(chatJid, []) }
 
-                        if (!groupMeta) {
-                            // Só pede metadata se o socket estiver aberto e pronto
-                            // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
-                            groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
-                                this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
-                                return null;
-                            });
-
-                            if (groupMeta) {
-                                this.groupCache.set(chatJid, groupMeta);
-                            }
-                        }
-
-                        // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
-                        chatName = groupMeta?.subject || chatJid;
-                    } catch (e) {
-                        chatName = chatJid;
-                    }
+                const novaMensagem = {
+                    id: m.key.id,
+                    fromMe: isFromMe,
+                    pushName: pushName,
+                    text: text,
+                    timestamp: m.messageTimestamp
                 }
 
-                const showNumberIfUser = (jid) => (
-                    jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
-                );
+                this.messages.get(chatJid).push(novaMensagem)
 
-                const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid));
+                this.emitter.emit('new_message', { sessionId: this.id, chatJid, ...novaMensagem })
 
-                console.log(
-                    `[MESSAGE RECEIVED] chat=${isGroup ? 'group' : 'direct'} ` +
-                    `chatJid=${chatJid} chatName=${chatName} ` +
-                    `fromJid=${senderJid} from=${fromLabel} ` +
-                    `type=${event.type} keys=${Object.keys(m.message || {})} ` +
-                    `text=${text}`
-                );
+                // let chatName = chatJid
+                // if (isGroup) {
+                //     try {
+                //         let groupMeta = this.groupCache.get(chatJid);
+
+                //         if (!groupMeta) {
+                //             // Só pede metadata se o socket estiver aberto e pronto
+                //             // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
+                //             groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
+                //                 this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
+                //                 return null;
+                //             });
+
+                //             if (groupMeta) {
+                //                 this.groupCache.set(chatJid, groupMeta);
+                //             }
+                //         }
+
+                //         // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
+                //         chatName = groupMeta?.subject || chatJid;
+                //     } catch (e) {
+                //         chatName = chatJid;
+                //     }
+                // }
+
+                // const showNumberIfUser = (jid) => (
+                //     jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
+                // )
+
+                // const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid))
             }
-        });
+        })
 
         this.sock = sock
         return sock
@@ -356,7 +442,7 @@ export class Session {
                 await this.sock.logout()
                 this.logger.warn({ sessionId }, 'Logout executado')
             } else {
-                await this.sock.end()
+                this.sock.end()
                 this.logger.warn({ sessionId }, 'Conexao encerrada')
             }
         } catch (err) {
@@ -365,7 +451,7 @@ export class Session {
             this.insecureTried.delete(sessionId)
             delete process.env.NODE_TLS_REJECT_UNAUTHORIZED
 
-            const info = this.sessionInfo.get(sessionInfo) || {}
+            const info = this.sessionInfo.get(sessionId) || {}
             this.sessionInfo.set(sessionId, {
                 ...info,
                 connection: 'close',

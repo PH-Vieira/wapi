@@ -13,6 +13,9 @@ app.use(cors({
     origin: 'http://localhost:5173',
 }))
 
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ limit: '50mb', extended: true }))
+
 app.use(express.json())
 
 const server = http.createServer(app)
@@ -49,52 +52,140 @@ app.get('/', (req, res) => {
     return res.status(214)
 })
 
-app.get('/sessions', (req, res) => {
+app.get('/sessions', async (req, res) => {
     console.log('[INFO] GET /sessions')
     const manager = WAManager.getInstance()
     if (!manager) { return res.status(418).json({ error: 'missin manager' }) }
-    const sessions = manager.listSessions()
+    const sessions = await manager.listSessions()
     return res.status(214).json(sessions)
 })
 
-app.post('/sessions', async (req, res) => {
-    console.log('[INFO] POST /sessions')
-    const sessionId = req.query.sessionId
+app.post('/sessions/:sessionId/connect', async (req, res) => {
+    const { sessionId } = req.params
     if (!sessionId) { return res.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    console.log(`[INFO] POST /sessions${sessionId}/connect`)
     const manager = WAManager.getInstance()
     if (!manager) { return res.status(418).json({ error: 'missin manager' }) }
     await manager.connectSession(sessionId)
     return res.status(214).json({ message: 'connecting..' })
 })
 
+app.post('/sessions/:sessionId', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { return res.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    console.log(`[INFO] POST /sessions/${sessionId}`)
+    const manager = WAManager.getInstance()
+    if (!manager) { return res.status(418).json({ error: 'missin manager' }) }
+    try {
+        await manager.createSession(sessionId)
+    } catch (err) {
+        return res.status(500).json({ error: err.message })
+    }
+    return res.status(214).json({ message: `session ${sessionId} created` })
+})
+
 app.get('/sessions/:sessionId', (req, res) => {
     const { sessionId } = req.params
     const manager = WAManager.getInstance()
-    const sessionData = manager.getSession(sessionId)
+    const session = manager.sessions.get(sessionId)
 
-    if (!sessionData) {
-        return res.status(418).json({
-            sessionId,
-            error: `Sessão ${sessionId} não encontrada`
-        })
+    if (!session) {
+        return res.status(418).json({ sessionId, error: `Sessão ${sessionId} não encontrada` })
     }
 
-    console.log(`[INFO] GET /sessions/${sessionId} - Status: ${sessionData.status}`)
-    
-    // O correto é passar UM único objeto combinando os dados
-    return res.status(214).json({
+    const allMessages = {}
+    if (session.messages) {
+        session.messages.forEach((msgs, jid) => { allMessages[jid] = msgs })
+    }
+
+    const info = session.sessionInfo?.get(sessionId) || {}
+    const statusReal = info.connection || 'close'
+
+    const responseData = {
         sessionId,
-        ...sessionData
-    })
+        status: statusReal,
+        qrCode: manager.qrCodes.get(sessionId) || null,
+        allMessages: allMessages
+    }
+
+    console.log(`[INFO] GET /sessions/${sessionId} - Status: ${responseData.status}`)
+    return res.status(200).json(responseData)
 })
+
+app.post('/sessions/:sessionId/disconnect', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { return res.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    console.log(`[INFO] POST /sessions${sessionId}/disconnect`)
+    const manager = WAManager.getInstance()
+    await manager.disconnectSession(sessionId)
+    res.json({ message: "sessao desconectada" })
+})
+
+app.delete('/sessions/:sessionId', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionId) { return res.status(417).json({ error: 'sessionId eh obrigatorio' }) }
+    console.log(`[INFO] DELETE /sessions${sessionId}`)
+    const manager = WAManager.getInstance()
+    await manager.destroySession(sessionId)
+    res.json({ message: 'sessao excluida com sucesso' })
+})
+
+app.get('/sessions/:sessionId/chats/:chatJid/messages', (req, res) => {
+    const { sessionId, chatJid } = req.params;
+    const manager = WAManager.getInstance();
+    const session = manager.sessions.get(sessionId);
+
+    if (!session) return res.status(404).json({ error: 'sessao nao encontrada' });
+
+    const messages = session.messages.get(chatJid) || [];
+    return res.json(messages);
+})
+
+app.post('/sessions/:sessionId/chats/:chatJid/messages', async (req, res) => {
+    const { sessionId, chatJid } = req.params;
+    const { text } = req.body;
+
+    if (!text) return res.status(400).json({ error: 'O texto da mensagem é obrigatório' });
+
+    const manager = WAManager.getInstance();
+    const session = manager.sessions.get(sessionId);
+
+    if (!session || !session.sock) {
+        return res.status(404).json({ error: 'Sessão não encontrada ou não conectada' });
+    }
+
+    try {
+        const sentMsg = await session.sock.sendMessage(chatJid, { text });
+
+        const novaMensagem = {
+            id: sentMsg.key.id,
+            chatJid,
+            text,
+            fromMe: true,
+            pushName: 'Eu',
+            timestamp: Math.floor(Date.now() / 1000),
+            url: null,
+            mimetype: null
+        };
+
+        if (!session.messages.has(chatJid)) {
+            session.messages.set(chatJid, []);
+        }
+        session.messages.get(chatJid).push(novaMensagem);
+
+        return res.status(201).json(novaMensagem);
+    } catch (err) {
+        console.error(`[ERROR] Falha ao enviar mensagem: ${err.message}`);
+        return res.status(500).json({ error: 'Erro interno ao enviar mensagem' });
+    }
+});
+
 
 // --------------------------------- //
 
 const manager = WAManager.getInstance()
 app.locals.manager = manager
 await manager.createSession('default')
-await manager.createSession('default2')
-// await manager.connectSession('default')
 
 manager.emitter.on('qr', ({ sessionId }) => {
     const img = manager.qrCodes.get(sessionId);

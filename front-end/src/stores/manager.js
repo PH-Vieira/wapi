@@ -7,9 +7,10 @@ export const useManagerStore = defineStore('manager', {
         pooling_intervals: {},
         connecting_sessions: {},
         session_pooling_interval: 2000,
+        chatMessages: {},
+        messagesByChat: {}
     }),
     actions: {
-        // Busca todas as sessões
         async getSessions() {
             try {
                 const res = await api.get('/sessions')
@@ -20,34 +21,44 @@ export const useManagerStore = defineStore('manager', {
             }
         },
 
-        // Busca uma sessão específica
         async getSession(sessionId) {
             try {
-                const res = await api.get(`/sessions/${sessionId}`, { params: { sessionId } });
-
+                const res = await api.get(`/sessions/${sessionId}`);
                 const idx = this.sessions.findIndex(s => s.id === sessionId);
-                if (idx !== -1) {
-                    // Unimos os dados da API + o status HTTP da resposta
-                    this.sessions[idx] = {
-                        ...this.sessions[idx],
-                        ...res.data,
-                        httpStatus: res.status // ESSENCIAL PARA O GATO
-                    };
 
-                    // Se o QR Code chegou ou conectou, para o loading
-                    if (res.data.qrCode || res.data.status === 'open') {
+                if (idx !== -1) {
+                    this.sessions[idx] = { ...this.sessions[idx], ...res.data };
+
+                    if (res.data.allMessages) {
+                        Object.entries(res.data.allMessages).forEach(([chatJid, messages]) => {
+                            messages.forEach(msg => {
+                                this.storeMessage(sessionId, chatJid, msg);
+                            });
+                        });
+                    }
+
+                    const status = res.data.status;
+                    const temQR = !!res.data.qrCode;
+
+                    if (temQR || status === 'open') {
                         delete this.connecting_sessions[sessionId];
+                    }
+
+                    if (status === 'close' && !temQR) {
+                        setTimeout(() => {
+                            const sessaoAtual = this.sessions.find(s => s.id === sessionId);
+                            if (sessaoAtual && sessaoAtual.status === 'close' && !sessaoAtual.qrCode) {
+                                delete this.connecting_sessions[sessionId];
+                            }
+                        }, 2500);
                     }
                 }
             } catch (err) {
-                console.error("Erro no pooling:", err);
-                // Em caso de erro, salva o status do erro (ex: 418 ou 404) para o gato
-                const idx = this.sessions.findIndex(s => s.id === sessionId);
-                if (idx !== -1 && err.response) {
-                    this.sessions[idx].httpStatus = err.response.status;
-                }
+                console.error("Erro no pooling de mensagens:", err);
+                delete this.connecting_sessions[sessionId];
             }
         },
+
 
         // LIGA o pooling individualmente
         startPooling(sessionId) {
@@ -83,12 +94,89 @@ export const useManagerStore = defineStore('manager', {
         async conectar(sessionId) {
             try {
                 this.connecting_sessions[sessionId] = true
-                await api.post(`/sessions`, null, { params: { sessionId } })
+                await api.post(`/sessions/${sessionId}/connect`)
                 this.startPooling(sessionId)
             } catch (err) {
-                console.error(`[ERROR] manager store: ${err}`)
+                console.log(`[ERROR] manager store: ${err}`)
                 delete this.connecting_sessions[sessionId]
             }
-        }
+        },
+
+        async create_session(sessionId) {
+            try {
+                await api.post(`/sessions/${sessionId}`)
+                await this.getSessions()
+            } catch (err) {
+                console.log(`[ERROR] manager store: ${err}`)
+            }
+        },
+
+        async desconectar(sessionId) {
+            try {
+                await api.post(`/sessions/${sessionId}/disconnect`)
+                if (this.connecting_sessions[sessionId]) {
+                    delete this.connecting_sessions[sessionId]
+                }
+                await this.getSessions()
+            } catch (err) {
+                console.log(`[ERROR] Erro ao desconectar: ${err}`)
+            }
+        },
+
+        async excluir(sessionId) {
+            if (!confirm(`Tem certeza que deseja excluir a sessao ${sessionId}?`)) return
+
+            try {
+                await api.delete(`/sessions/${sessionId}`)
+                delete this.connecting_sessions[sessionId]
+                this.sessions = this.sessions.filter(s => s.id !== sessionId)
+            } catch (err) {
+                console.log(`[ERROR] Erro ao excluir: ${err}`)
+            }
+        },
+
+        async fetchMessages(sessionId, chatJid) {
+            try {
+                const res = await api.get(`/sessions/${sessionId}/chats/${chatJid}/messages`)
+                if (!this.chatMessages[sessionId]) this.chatMessages[sessionId] = {}
+                this.chatMessages[sessionId][chatJid] = res.data
+            } catch (err) { console.log(`[ERROR] Erro ao buscar mensagens: ${err}`) }
+        },
+
+        async sendMessage(sessionId, chatJid, text) {
+            try {
+                const res = await api.post(`/sessions/${sessionId}/chats/${chatJid}/messages`, { text });
+
+                if (res.data) {
+                    this.storeMessage(sessionId, chatJid, res.data);
+                }
+                return true;
+            } catch (err) {
+                console.error(`[ERROR] Erro ao enviar mensagem: ${err}`);
+                return false;
+            }
+        },
+
+        storeMessage(sessionId, chatJid, message) {
+            if (!this.messagesByChat[sessionId]) this.messagesByChat[sessionId] = {}
+            if (!this.messagesByChat[sessionId][chatJid]) this.messagesByChat[sessionId][chatJid] = []
+
+            const exists = this.messagesByChat[sessionId][chatJid].some(m => m.id === message.id)
+
+            if (!exists) {
+                this.messagesByChat[sessionId][chatJid].push({
+                    id: message.id,
+                    text: message.text,
+                    fromMe: message.fromMe,
+                    pushName: message.pushName,
+                    chatName: message.chatName,
+                    timestamp: message.timestamp,
+                    url: message.url || null,
+                    mimetype: message.mimetype || null,
+                    base64: message.base64 || null
+                })
+                this.messagesByChat = { ...this.messagesByChat }
+            }
+        },
     }
 })

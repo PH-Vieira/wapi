@@ -48,12 +48,12 @@ onMounted(() => {
 
 <template>
   <div
-    class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 border overflow-hidden">
-    <div class="flex justify-center items-center gap-2 w-11/12 h-1/12 border">
+    class="bg-emerald-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 overflow-hidden">
+    <div class="flex justify-center items-center gap-2 w-11/12 h-1/12">
       <p>WS: {{ isOpen ? 'conectado' : 'desconectado' }}</p>
 
     </div>
-    <div class="flex flex-col gap-2 items-center w-11/12 h-7/12 border p-2">
+    <div class="flex flex-col gap-2 items-center w-11/12 h-7/12 p-2">
       <component :is="main_component === 'Workers' ? Workers : Config" />
       <!-- <div ref="chatBox" class="flex flex-col w-full max-h-[90%] overflow-auto">
         <div v-for="msg in msgHist" class="flex content-start items-start text-left w-full">
@@ -64,7 +64,7 @@ onMounted(() => {
       </div> -->
       <!-- <img v-if="lastMsg?.qr" class="w-96" :src="lastMsg.qr"> -->
     </div>
-    <div class="flex flex-row gap-2 justify-center items-center w-11/12 h-1/12 border">
+    <div class="flex flex-row gap-2 justify-center items-center w-11/12 h-1/12">
       <button @click="main_component = 'Workers'"
         class="border px-2 py-1 rounded-md bg-emerald-700 transition-colors hover:bg-emerald-500 cursor-pointer"
         type="button">Workers</button>

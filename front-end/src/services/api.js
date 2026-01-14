@@ -15,7 +15,7 @@ api.interceptors.response.use(
 
     const store = useCatsStore()
     store.addCat(id, response.status, response.data)
-    toast.success(`Sessão ${id}: Sucesso`)
+    // toast.success(`Sessão ${id}: Sucesso`)
 
     return response
   },

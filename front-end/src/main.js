@@ -7,4 +7,4 @@ import "vue-toastification/dist/index.css";
 
 const pinia = createPinia()
 
-createApp(App).use(Toast, { position: "bottom-right", timeout: 3000 }).use(pinia).mount('#app')
+createApp(App).use(Toast, { position: "bottom-right", timeout: 2500 }).use(pinia).mount('#app')
