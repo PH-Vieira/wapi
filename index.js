@@ -16,8 +16,6 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ limit: '50mb', extended: true }))
 
-app.use(express.json())
-
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server })
 
@@ -143,43 +141,81 @@ app.get('/sessions/:sessionId/chats/:chatJid/messages', (req, res) => {
 
 app.post('/sessions/:sessionId/chats/:chatJid/messages', async (req, res) => {
     const { sessionId, chatJid } = req.params;
-    const { text } = req.body;
+    const { text, media, mimetype, isPtt } = req.body;
 
-    if (!text) return res.status(400).json({ error: 'O texto da mensagem é obrigatório' });
+    console.log(`[DEBUG] Envio recebido - Text: ${!!text}, Media: ${!!media}, Mime: ${mimetype}`);
+
+    // Validação básica: precisa de texto OU mídia
+    if (!text && !media) {
+        return res.status(400).json({ error: "Conteúdo da mensagem é obrigatório" });
+    }
 
     const manager = WAManager.getInstance();
     const session = manager.sessions.get(sessionId);
 
     if (!session || !session.sock) {
-        return res.status(404).json({ error: 'Sessão não encontrada ou não conectada' });
+        return res.status(404).json({ error: 'Sessão não conectada' });
     }
 
     try {
-        const sentMsg = await session.sock.sendMessage(chatJid, { text });
+        let payload = {};
+        let mediaBuffer = null;
 
+        // 1. Processamento de Mídia (se houver)
+        if (media) {
+            // Remove o cabeçalho do Base64 (ex: data:image/png;base64,)
+            const base64Data = media.split(',')[1] || media;
+            mediaBuffer = Buffer.from(base64Data, 'base64');
+
+            if (mimetype.includes('image')) {
+                // Se for imagem ou figurinha (o Baileys diferencia pelo método ou flag)
+                payload = { image: mediaBuffer, caption: text };
+            } else if (mimetype.includes('audio')) {
+                payload = {
+                    audio: mediaBuffer,
+                    mimetype: 'audio/mp4', // Padrão WhatsApp para compatibilidade
+                    ptt: isPtt // Se true, envia como nota de voz
+                };
+            }
+        } else {
+            // 2. Apenas Texto
+            payload = { text };
+        }
+
+        // 3. Envio via Baileys
+        const sentMsg = await session.sock.sendMessage(chatJid, payload);
+
+        // 4. Montagem do objeto de resposta para o Front-end
         const novaMensagem = {
             id: sentMsg.key.id,
             chatJid,
-            text,
+            chatName: session.messages.get(chatJid)?.[0]?.chatName || chatJid,
+            text: text || (media ? (mimetype.includes('image') ? '[imagem]' : '[áudio]') : ''),
             fromMe: true,
             pushName: 'Eu',
             timestamp: Math.floor(Date.now() / 1000),
-            url: null,
-            mimetype: null
+            url: media ? media : null, // Retorna o próprio base64 para exibição imediata
+            mimetype: mimetype || null
         };
 
+        // 5. Salva no histórico da sessão
         if (!session.messages.has(chatJid)) {
             session.messages.set(chatJid, []);
         }
         session.messages.get(chatJid).push(novaMensagem);
 
+        // Limite de cache (ex: manter últimas 50)
+        if (session.messages.get(chatJid).length > 50) {
+            session.messages.get(chatJid).shift();
+        }
+
         return res.status(201).json(novaMensagem);
+
     } catch (err) {
-        console.error(`[ERROR] Falha ao enviar mensagem: ${err.message}`);
+        console.error(`[ERROR] Erro ao processar envio: ${err.message}`);
         return res.status(500).json({ error: 'Erro interno ao enviar mensagem' });
     }
-});
-
+})
 
 // --------------------------------- //
 

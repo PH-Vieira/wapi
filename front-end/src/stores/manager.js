@@ -143,16 +143,23 @@ export const useManagerStore = defineStore('manager', {
             } catch (err) { console.log(`[ERROR] Erro ao buscar mensagens: ${err}`) }
         },
 
-        async sendMessage(sessionId, chatJid, text) {
+        async sendMessage(sessionId, chatJid, text, media = null, mimetype = null, isPtt = false) {
             try {
-                const res = await api.post(`/sessions/${sessionId}/chats/${chatJid}/messages`, { text });
+                const payload = {
+                    text: text || '',
+                    media: media,
+                    mimetype: mimetype,
+                    isPtt: isPtt
+                };
+
+                const res = await api.post(`/sessions/${sessionId}/chats/${chatJid}/messages`, payload);
 
                 if (res.data) {
                     this.storeMessage(sessionId, chatJid, res.data);
+                    return true;
                 }
-                return true;
             } catch (err) {
-                console.error(`[ERROR] Erro ao enviar mensagem: ${err}`);
+                console.error("Erro na API de envio:", err.response?.data || err.message);
                 return false;
             }
         },

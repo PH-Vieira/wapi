@@ -10,6 +10,9 @@ const props = defineProps({
 const managerStore = useManagerStore()
 const jid_selecionado = ref(null)
 const chatContainer = ref(null)
+const isGravando = ref(false);
+const mediaRecorder = ref(null);
+const audioChunks = ref([]);
 
 watch(jid_selecionado, async () => {
     await nextTick()
@@ -120,13 +123,50 @@ const handleKeyPress = (e) => {
         enviarMensagem()
     }
 }
+
+// 1. Enviar Arquivo (Imagem/Áudio pronto)
+const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+        await managerStore.sendMessage(props.session_id, jid_selecionado.value, '', reader.result, file.type);
+    };
+    reader.readAsDataURL(file);
+};
+
+// 2. Gravar Áudio
+const toggleGravacao = async () => {
+    if (!isGravando.value) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder.value = new MediaRecorder(stream);
+        audioChunks.value = [];
+
+        mediaRecorder.value.ondataavailable = (e) => audioChunks.value.push(e.data);
+        mediaRecorder.value.onstop = async () => {
+            const blob = new Blob(audioChunks.value, { type: 'audio/ogg; codecs=opus' });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                managerStore.sendMessage(props.session_id, jid_selecionado.value, '', reader.result, 'audio/ogg', true);
+            };
+            reader.readAsDataURL(blob);
+        };
+
+        mediaRecorder.value.start();
+        isGravando.value = true;
+    } else {
+        mediaRecorder.value.stop();
+        isGravando.value = false;
+    }
+};
 </script>
 
 <template>
     <div class="flex h-[80vh] w-full bg-emerald-950 rounded-xl overflow-hidden border border-emerald-800 shadow-2xl">
 
         <!-- Sidebar Refinada -->
-        <aside class="w-1/3 border-r border-emerald-800 bg-emerald-900 overflow-y-auto overflow-x-hidden">
+        <aside class="w-1/4 border-r border-emerald-800 bg-emerald-900 overflow-y-auto overflow-x-hidden">
             <div
                 class="p-4 border-b border-emerald-800 font-bold text-emerald-400 bg-emerald-900/50 sticky top-0 z-10 backdrop-blur-md">
                 Conversas
@@ -153,7 +193,7 @@ const handleKeyPress = (e) => {
         </aside>
 
         <!-- Main Chat com Wallpaper -->
-        <main class="flex-1 flex flex-col relative bg-[#0b141a]">
+        <main class="flex-1 flex flex-col relative bg-[#0b141a] min-w-0">
             <template v-if="jid_selecionado">
                 <!-- Header -->
                 <div class="p-3 bg-emerald-900 border-b border-emerald-800 flex items-center gap-3 z-10 shadow-lg">
@@ -183,11 +223,21 @@ const handleKeyPress = (e) => {
                             ~ {{ msg.pushName || 'Contato' }}
                         </p>
 
-                        <div v-if="msg.url" class="mb-2 rounded overflow-hidden border border-black/20">
-                            <img :src="msg.url" class="w-full max-h-64 object-contain bg-black/5" />
+                        <!-- Renderização de FIGURINHA/IMAGEM -->
+                        <div v-if="msg.url && msg.mimetype?.includes('image')" class="my-2">
+                            <img :src="msg.url" class="w-40 h-40 object-contain rounded-lg shadow-inner bg-black/10" />
                         </div>
 
-                        <p v-if="msg.text !== '[sem texto]'" class="leading-relaxed">{{ msg.text }}</p>
+                        <!-- Renderização de ÁUDIO -->
+                        <div v-if="msg.url && msg.mimetype?.includes('audio')" class="my-2 min-w-50">
+                            <audio controls class="w-full h-8 accent-pink-500 rounded-lg shadow-sm">
+                                <source :src="msg.url" :type="msg.mimetype">
+                            </audio>
+                        </div>
+
+                        <!-- Renderização de TEXTO (caso não seja apenas mídia) -->
+                        <p v-if="msg.text !== '[sem texto]'" class="whitespace-pre-wrap break-words leading-relaxed">{{
+                            msg.text }}</p>
 
                         <div class="flex justify-end items-center gap-1 mt-1 opacity-60">
                             <span class="text-[9px]">{{ new Date(msg.timestamp * 1000).toLocaleTimeString([], {
@@ -207,9 +257,33 @@ const handleKeyPress = (e) => {
 
                 </div>
                 <footer class="p-4 bg-emerald-900 border-t border-emerald-800 flex items-center gap-3 z-30">
+                    <label class="cursor-pointer text-emerald-400 hover:text-white p-2">
+                        <input type="file" class="hidden" @change="handleFileUpload" accept="image/*,audio/*" />
+                        <svg xmlns="www.w3.org" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path
+                                d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </label>
+
                     <textarea v-model="novoTexto" @keydown="handleKeyPress" placeholder="Digite uma mensagem..."
                         class="flex-1 bg-[#2a3942] text-white text-sm rounded-lg p-3 outline-none resize-none overflow-hidden border border-transparent focus:border-emerald-500 transition-all"
                         rows="1"></textarea>
+
+                    <button @click="novoTexto.trim() ? enviarMensagem() : toggleGravacao()"
+                        :class="['p-3 rounded-full text-white transition-all', isGravando ? 'bg-red-600 animate-pulse' : 'bg-pink-600']">
+                        <svg v-if="!novoTexto.trim()" xmlns="www.w3.org" width="20" height="20" viewBox="0 0 24 24"
+                            fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                        <svg v-else xmlns="www.w3.org" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                    </button>
 
                     <button @click="enviarMensagem" :disabled="!novoTexto.trim()"
                         class="bg-pink-600 hover:bg-pink-500 disabled:opacity-50 p-3 rounded-full text-white transition-all shadow-lg flex-shrink-0">

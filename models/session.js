@@ -152,30 +152,21 @@ export class Session {
                 const chatJid = m.key.remoteJid;
                 if (!m.message) continue;
 
-                const isSticky = !!m.message.stickerMessage;
-                const isImage = !!m.message.imageMessage;
-                let mediaData = null;
+                const isSticky = !!m.message.stickerMessage
+                const isImage = !!m.message.imageMessage
+                const isAudio = !!m.message?.audioMessage
+                let mediaData = null
 
-                if (isSticky || isImage) {
+                if (isAudio || isSticky || isImage) {
                     try {
-                        // O downloadMediaMessage precisa do objeto 'm' inteiro
-                        const buffer = await downloadMediaMessage(
-                            m,
-                            'buffer',
-                            {},
-                            {
-                                logger: console, // Opcional: ajuda a ver erros de rede no log
-                                reuploadRequest: sock.updateMediaMessage
-                            }
-                        );
+                        const buffer = await downloadMediaMessage(m, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
 
                         if (buffer) {
-                            const mime = isSticky ? 'image/webp' : 'image/jpeg';
-                            mediaData = `data:${mime};base64,${buffer.toString('base64')}`;
-                            console.log(`[MEDIA] Sucesso ao baixar mídia da mensagem: ${m.key.id}`);
+                            let mimePrefix = isAudio ? 'audio/ogg; codecs=opus' : (isSticky ? 'image/webp' : 'image/jpeg');
+                            mediaData = `data:${mimePrefix};base64,${buffer.toString('base64')}`;
                         }
                     } catch (err) {
-                        console.error(`[MEDIA ERROR] Falha no download (ID: ${m.key.id}):`, err.message);
+                        console.error(`[BACKEND ERROR] Erro no download da mídia:`, err.message);
                     }
                 }
 
@@ -200,7 +191,7 @@ export class Session {
                     pushName: m.pushName || 'Contato',
                     timestamp: m.messageTimestamp,
                     url: mediaData,
-                    mimetype: isSticky ? 'image/webp' : (isImage ? 'image/jpeg' : null)
+                    mimetype: isSticky ? 'image/webp' : (isImage ? 'image/jpeg' : (isAudio ? 'audio/ogg' : null))
                 }
 
                 if (!this.messages.has(chatJid)) {

@@ -103,7 +103,7 @@ watch(() => managerStore.sessions, (novasSessões) => {
         <Teleport to="body">
             <div v-if="chat_sessao_id" class="fixed inset-0 bg-black/80 flex items-center justify-center z-999 p-4"
                 @click="chat_sessao_id = null">
-                <div class="w-full max-w-4xl h-[80vh] shadow-2xl overflow-hidden rounded-2xl" @click.stop>
+                <div class="w-full max-w-7xl h-[80vh] shadow-2xl overflow-hidden rounded-2xl" @click.stop>
                     <Chat_modal :session_id="chat_sessao_id" @close="chat_sessao_id = null" />
                 </div>
             </div>
