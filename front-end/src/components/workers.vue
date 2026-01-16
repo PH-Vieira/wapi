@@ -35,9 +35,9 @@ watch(() => managerStore.sessions, (novasSessões) => {
 </script>
 
 <template>
-    <div class="bg-emerald-700 rounded-md flex flex-col items-center justify-center w-full h-full p-4 overflow-auto">
+    <div class="bg-sky-700 rounded-md flex flex-col items-center justify-center w-full h-full p-4 overflow-auto">
         <ul class="flex flex-col w-full max-w-4xl rounded-lg">
-            <li class="bg-pink-700 rounded-lg my-2 px-4 py-3 flex items-center gap-4 text-white cursor-pointer hover:outline-1 outline-offset-3"
+            <li class="bg-yellow-700 rounded-lg my-2 px-4 py-3 flex items-center gap-4 text-white cursor-pointer hover:outline-1 outline-offset-3"
                 v-for="session in managerStore.sessions" :key="session.id"
                 @click="session.status === 'open' ? chat_sessao_id = session.id : null">
 
@@ -48,7 +48,7 @@ watch(() => managerStore.sessions, (novasSessões) => {
                 </div> -->
 
                 <div class="grow">
-                    <div class="font-bold text-emerald-400">{{ session.id }}</div>
+                    <div class="font-bold text-sky-400">{{ session.id }}</div>
                     <div class="text-xs uppercase opacity-70">Status: {{ session.status }}</div>
                     <!-- <div class="text-xs font-mono">HTTP: {{ session.httpStatus || '---' }}</div> -->
                 </div>
@@ -57,7 +57,7 @@ watch(() => managerStore.sessions, (novasSessões) => {
                 <div class="flex gap-2">
                     <button @click.stop="togglePooling(session.id)" :class="[
                         'cursor-pointer px-3 py-1 border rounded transition-colors',
-                        managerStore.pooling_intervals[session.id] ? 'cursor-pointer bg-amber-600 border-amber-400' : 'hover:bg-emerald-600 border-emerald-500'
+                        managerStore.pooling_intervals[session.id] ? 'cursor-pointer bg-amber-600 border-amber-400' : 'hover:bg-sky-600 border-sky-500'
                     ]">
                         {{ managerStore.pooling_intervals[session.id] ? 'Parar' : 'Monitorar' }}
                     </button>
@@ -93,9 +93,9 @@ watch(() => managerStore.sessions, (novasSessões) => {
         </ul>
         <div>
             <form @submit.prevent="create_new_session">
-                <input v-model="new_session_name" class="bg-pink-700 px-2 rounded-md mx-1" type="text"
+                <input v-model="new_session_name" class="bg-yellow-700 px-2 rounded-md mx-1" type="text"
                     placeholder="Nome da sessão" required>
-                <button class="bg-emerald-800 cursor-pointer px-2 rounded-md" type="submit">
+                <button class="bg-sky-800 cursor-pointer px-2 rounded-md" type="submit">
                     Adicionar sessão
                 </button>
             </form>
