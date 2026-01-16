@@ -165,6 +165,7 @@ export const useManagerStore = defineStore('manager', {
         },
 
         storeMessage(sessionId, chatJid, message) {
+            // console.log(`[STOREMESSAGE]: ${sessionId} | ${chatJid} | ${JSON.stringify(message)}`)
             if (!this.messagesByChat[sessionId]) this.messagesByChat[sessionId] = {}
             if (!this.messagesByChat[sessionId][chatJid]) this.messagesByChat[sessionId][chatJid] = []
 

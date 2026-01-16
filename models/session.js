@@ -334,10 +334,6 @@ export class Session {
 
         })
 
-        // this.groupCache.on('set', (key, val) => {
-
-        // })
-
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
                 const messageType = Object.keys(m.message || {})[0]
@@ -383,37 +379,6 @@ export class Session {
                 this.messages.get(chatJid).push(novaMensagem)
 
                 this.emitter.emit('new_message', { sessionId: this.id, chatJid, ...novaMensagem })
-
-                // let chatName = chatJid
-                // if (isGroup) {
-                //     try {
-                //         let groupMeta = this.groupCache.get(chatJid);
-
-                //         if (!groupMeta) {
-                //             // Só pede metadata se o socket estiver aberto e pronto
-                //             // O uso do optional chaining ?. evita erros se o sock for fechado no meio do loop
-                //             groupMeta = await sock?.groupMetadata(chatJid).catch((err) => {
-                //                 this.logger.debug({ chatJid, err: err.message }, 'Falha silenciosa no metadata');
-                //                 return null;
-                //             });
-
-                //             if (groupMeta) {
-                //                 this.groupCache.set(chatJid, groupMeta);
-                //             }
-                //         }
-
-                //         // Se ainda não tiver meta, chatName continua sendo o JID para não quebrar o log
-                //         chatName = groupMeta?.subject || chatJid;
-                //     } catch (e) {
-                //         chatName = chatJid;
-                //     }
-                // }
-
-                // const showNumberIfUser = (jid) => (
-                //     jid?.endsWith('@s.whatsapp.net') ? jid.replace(/@.+$/, '') : '[opaque-id]'
-                // )
-
-                // const fromLabel = pushName ?? (isGroup ? senderJid : showNumberIfUser(senderJid))
             }
         })
 

@@ -40,13 +40,7 @@ export class WAManager {
             this.emitter.emit('connection.update', data)
         })
 
-
-        // session.onError = (id, err) => {
-        //     this.emitter.emit('error', { session: id, error: err })
-        // }
-
         session.emitter.on('new_message', (data) => {
-            console.log(`[MANAGER] Nova mensagem na sessao ${data.sessionId}: ${data.text}`)
             this.emitter.emit('new_message', data)
         })
 

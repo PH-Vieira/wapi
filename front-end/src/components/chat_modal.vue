@@ -43,7 +43,7 @@ const lista_chats_detalhada = computed(() => {
         const ultimaMsg = msgs[msgs.length - 1]
         return {
             jid,
-            nome: ultimaMsg?.chatName || jid.split('@')[0],
+            nome: String(ultimaMsg?.chatName).endsWith('@lid') ? ultimaMsg?.pushName : ( ultimaMsg?.chatName || '[Chat]' ),
             ultimaMensagem: ultimaMsg?.text === '[sem texto]' ? '📷 Mídia' : ultimaMsg?.text,
             horario: ultimaMsg ? new Date(ultimaMsg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
         }
