@@ -1,23 +1,21 @@
 <script setup>
 import { useWebSocket } from './composables/useWebSocket'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import axios from 'axios'
 import Workers from './components/workers.vue'
 import Config from './components/config.vue'
 import { useManagerStore } from './stores/manager'
-import { useCatsStore } from './stores/cats'
+import Temas from './components/temas.vue'
+import { useColorsStore } from './stores/colors'
 
 const { isOpen, lastMsg, send } = useWebSocket('ws://localhost:3000')
-// function criarSessao() {
-//   send({ type: 'createSession', sessionId: 'abc' })
-// }
 
 const msgHist = ref([])
 const chatBox = ref(HTMLElement)
 const health = ref('')
 const main_component = ref('Workers')
 const managerStore = useManagerStore()
-const catsStore = useCatsStore()
+const colorsStore = useColorsStore()
 
 watch(lastMsg, async (newMsg, _lastMsg) => {
   msgHist.value.push(newMsg)
@@ -43,26 +41,18 @@ onMounted(() => {
   health_check()
   managerStore.getSessions()
 })
-
 </script>
 
 <template>
-  <div
-    class="bg-sky-900 text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 overflow-hidden">
+  <div class="text-white font-mono flex flex-col w-screen h-screen justify-center items-center gap-2 overflow-hidden"
+    :style="{ backgroundColor: colorsStore.getActiveColor.from_400 }">
+    <Temas class="z-444" />
     <div class="flex justify-center items-center gap-2 w-11/12 h-1/12">
       <p>WS: {{ isOpen ? 'conectado' : 'desconectado' }}</p>
 
     </div>
     <div class="flex flex-col gap-2 items-center w-11/12 h-7/12 p-2">
       <component :is="main_component === 'Workers' ? Workers : Config" />
-    </div>
-    <div class="flex flex-row gap-2 justify-center items-center w-11/12 h-1/12">
-      <button @click="main_component = 'Workers'"
-        class="border px-2 py-1 rounded-md bg-sky-700 transition-colors hover:bg-sky-500 cursor-pointer"
-        type="button">Workers</button>
-      <button @click="main_component = 'Config'"
-        class="border px-2 py-1 rounded-md bg-sky-700 transition-colors hover:bg-sky-500 cursor-pointer"
-        type="button">Config</button>
     </div>
   </div>
 </template>

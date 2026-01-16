@@ -66,13 +66,13 @@ export class Session {
         const sock = makeWASocket({
             logger: this.logger,
             browser: Browsers.macOS('Desktop'),
-            syncFullHistory: false,
+            syncFullHistory: true,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, this.logger),
             },
             markOnlineOnConnect: true,
-            shouldSyncHistoryMessage: () => false,
+            shouldSyncHistoryMessage: () => true,
             cachedGroupMetadata: async (jid) => this.groupCache.get(jid)
         });
 
@@ -149,12 +149,14 @@ export class Session {
             // if (event.type !== 'notify') return
 
             for (const m of event.messages) {
+                console.log(`[message] ${m.pushName}`)
                 const chatJid = m.key.remoteJid;
                 if (!m.message) continue;
 
                 const isSticky = !!m.message.stickerMessage
                 const isImage = !!m.message.imageMessage
                 const isAudio = !!m.message?.audioMessage
+                const senderPn = m.key.participant || m.key.remoteJid
                 let mediaData = null
 
                 if (isAudio || isSticky || isImage) {
@@ -191,7 +193,9 @@ export class Session {
                     pushName: m.pushName || 'Contato',
                     timestamp: m.messageTimestamp,
                     url: mediaData,
-                    mimetype: isSticky ? 'image/webp' : (isImage ? 'image/jpeg' : (isAudio ? 'audio/ogg' : null))
+                    mimetype: isSticky ? 'image/webp' : (isImage ? 'image/jpeg' : (isAudio ? 'audio/ogg' : null)),
+                    senderPn: m.verifiedBizName || m.pushName || null,
+                    participantAlt: (chatJid.includes('@lid')) ? m.key.participant : null
                 }
 
                 if (!this.messages.has(chatJid)) {
@@ -212,6 +216,16 @@ export class Session {
                 })
             }
         })
+
+        sock.ev.on('lid-mapping.update', (mappings) => {
+            console.log(`[mappings] ${mappings}`)
+        })
+
+        sock.ev.on('presence.update', (presence) => { console.log(`[presence] ${JSON.stringify(presence)}`) })
+
+        sock.ev.on('chats.update', (chatsUpdate) => { console.log(`[chats update] ${JSON.stringify(chatsUpdate)}`) })
+
+        sock.ev.on('contacts.upsert', (contactsUpsert) => { console.log(`[contacts upsert] ${JSON.stringify(contactsUpsert)}`) })
 
         sock.ev.on('groups.update', async (updates) => {
             for (const update of updates) {
@@ -336,6 +350,7 @@ export class Session {
 
         sock.ev.on('messages.upsert', async (event) => {
             for (const m of event.messages) {
+                console.log(`[session] ---------------------------------`, JSON.stringify(m), '--------------------------')
                 const messageType = Object.keys(m.message || {})[0]
                 const isProtocol = !!m.message?.protocolMessage
                 const isFromMe = !!m.key.fromMe

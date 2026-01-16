@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+.bg-hover:hover {
+    background-color: var(--bg-hover);
+}
+
+.border-focus:focus {
+    border-color: var(--border-focus);
+}

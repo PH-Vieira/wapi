@@ -8,6 +8,8 @@ export const useManagerStore = defineStore('manager', {
         connecting_sessions: {},
         session_pooling_interval: 2000,
         chatMessages: {},
+        chatNames: {},
+        jidMestre: {},
         messagesByChat: {}
     }),
     actions: {
@@ -15,7 +17,7 @@ export const useManagerStore = defineStore('manager', {
             try {
                 const res = await api.get('/sessions')
                 this.sessions = res.data
-                console.log(`[INFO] manager store: ${this.sessions.length} sessões carregadas`)
+                // console.log(`[INFO] manager store: ${this.sessions.length} sessões carregadas`)
             } catch (err) {
                 console.error(`[ERROR] manager store: ${err}`)
             }
@@ -64,7 +66,7 @@ export const useManagerStore = defineStore('manager', {
         startPooling(sessionId) {
             if (this.pooling_intervals[sessionId]) return // Já está ativo
 
-            console.log(`[POOLING] Iniciado: ${sessionId}`)
+            // console.log(`[POOLING] Iniciado: ${sessionId}`)
             this.getSession(sessionId) // Executa a primeira vez imediato
 
             this.pooling_intervals[sessionId] = setInterval(() => {
@@ -77,7 +79,7 @@ export const useManagerStore = defineStore('manager', {
             if (this.pooling_intervals[sessionId]) {
                 clearInterval(this.pooling_intervals[sessionId])
                 delete this.pooling_intervals[sessionId]
-                console.log(`[POOLING] Parado: ${sessionId}`)
+                // console.log(`[POOLING] Parado: ${sessionId}`)
             }
         },
 
@@ -164,27 +166,68 @@ export const useManagerStore = defineStore('manager', {
             }
         },
 
-        storeMessage(sessionId, chatJid, message) {
-            // console.log(`[STOREMESSAGE]: ${sessionId} | ${chatJid} | ${JSON.stringify(message)}`)
+        storeMessage(sessionId, chatJidRaw, message) {
+            // 1. Inicialização de segurança
             if (!this.messagesByChat[sessionId]) this.messagesByChat[sessionId] = {}
-            if (!this.messagesByChat[sessionId][chatJid]) this.messagesByChat[sessionId][chatJid] = []
+            if (!this.chatNames[sessionId]) this.chatNames[sessionId] = {}
+            if (!this.jidMestre) this.jidMestre = {} // Certifique-se de ter este campo no seu state()
 
-            const exists = this.messagesByChat[sessionId][chatJid].some(m => m.id === message.id)
+            // 2. Extração de Identidade (A mágica do Baileys 2026)
+            // O backend costuma enviar o número real em participantAlt ou senderPn quando o JID é LID
+            const identificadorAlternativo = message.participantAlt || message.senderPn;
 
-            if (!exists) {
-                this.messagesByChat[sessionId][chatJid].push({
-                    id: message.id,
-                    text: message.text,
-                    fromMe: message.fromMe,
-                    pushName: message.pushName,
-                    chatName: message.chatName,
-                    timestamp: message.timestamp,
-                    url: message.url || null,
-                    mimetype: message.mimetype || null,
-                    base64: message.base64 || null
-                })
-                this.messagesByChat = { ...this.messagesByChat }
+            // Se recebemos um LID e temos o número real dele, criamos o vínculo
+            if (chatJidRaw.includes('@lid') && identificadorAlternativo) {
+                if (this.jidMestre[chatJidRaw] !== identificadorAlternativo) {
+                    console.log(`%c[VÍNCULO DETECTADO] Unificando LID ${chatJidRaw} -> PN ${identificadorAlternativo}`, "color: #ff9800; font-weight: bold;");
+                    this.jidMestre[chatJidRaw] = identificadorAlternativo;
+                }
             }
-        },
+
+            // 3. Determina o JID Alvo (Se for LID conhecido, usa o número real para agrupar)
+            const targetJid = this.jidMestre[chatJidRaw] || chatJidRaw;
+
+            if (chatJidRaw !== targetJid) {
+                console.log(`%c[REDIRECIONAMENTO] Mensagem de ${chatJidRaw} movida para gaveta de ${targetJid}`, "color: #9c27b0;");
+            }
+
+            // 4. Inicializa o array do chat unificado
+            if (!this.messagesByChat[sessionId][targetJid]) {
+                this.messagesByChat[sessionId][targetJid] = [];
+            }
+
+            // 5. Lógica de Nome (Prioridade: Nome Real > Número > ID)
+            const nomeAtual = this.chatNames[sessionId][targetJid];
+            const novoNome = message.chatName || message.pushName;
+            const eLixo = (n) => !n || n.includes('@') || /^\d+$/.test(n.replace(/[-]/g, '')) || (n.length > 15 && /^\d+/.test(n));
+
+            if (!eLixo(novoNome)) {
+                if (!message.fromMe || eLixo(nomeAtual)) {
+                    if (nomeAtual !== novoNome) {
+                        console.log(`%c[NOME] Atualizando "${targetJid}" para "${novoNome}"`, "color: #4CAF50;");
+                        this.chatNames[sessionId][targetJid] = novoNome;
+                    }
+                }
+            }
+
+            // Fallback de nome se estiver vazio
+            if (!this.chatNames[sessionId][targetJid]) {
+                this.chatNames[sessionId][targetJid] = targetJid.split('@')[0];
+            }
+
+            // 6. Gravação Final
+            const exists = this.messagesByChat[sessionId][targetJid].some(m => m.id === message.id);
+            if (!exists) {
+                console.log(`[STORAGE] Gravando mensagem no chat: ${targetJid}`);
+                this.messagesByChat[sessionId][targetJid].push({
+                    ...message,
+                    displayName: this.chatNames[sessionId][targetJid]
+                });
+
+                // Forçar reatividade do Vue
+                this.messagesByChat = { ...this.messagesByChat };
+                this.chatNames = { ...this.chatNames };
+            }
+        }
     }
 })
