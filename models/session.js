@@ -1,6 +1,7 @@
 import makeWASocket, { Browsers, DisconnectReason, makeCacheableSignalKeyStore, useMultiFileAuthState, downloadMediaMessage } from '@whiskeysockets/baileys'
 import { EventEmitter } from 'events'
-import qrcode from 'qrcode-terminal'
+import QRCodeTerminal from 'qrcode-terminal'
+import QRCode from 'qrcode'
 import NodeCache from 'node-cache'
 import fs from 'fs'
 import path from 'path'
@@ -10,9 +11,11 @@ export class Session {
     /**
      * Classe responsavel por uma sessao
      * @param {string} sessionId required session id
+     * @param {string} managerEmitter centralized emitter
      */
-    constructor(sessionId) {
+    constructor(sessionId, managerEmitter) {
         this.id = sessionId
+        this.managerEmitter = managerEmitter
         this.sock = null
         this.chats = new Map()
         this.messages = new Map()
@@ -51,17 +54,17 @@ export class Session {
        * @param {{ printQRInTerminal?: boolean }} opts
        */
     async conectar(sessionId, { printQRInTerminal = true, insecure = false } = {}) {
-        this.sessionId = sessionId;
-        this.manualDisconnect.delete(sessionId);
+        this.sessionId = sessionId
+        this.manualDisconnect.delete(sessionId)
 
         if (insecure) {
-            process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-            this.insecureTried.add(sessionId);
-            this.logger.warn({ sessionId }, '[TLS] Iniciando em modo INSEGURO');
+            process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+            this.insecureTried.add(sessionId)
+            this.logger.warn({ sessionId }, '[TLS] Iniciando em modo INSEGURO')
         }
 
-        const authDir = path.join(this.baseAuthDir, `session-${sessionId}`);
-        const { state, saveCreds } = await useMultiFileAuthState(authDir);
+        const authDir = path.join(this.baseAuthDir, `session-${sessionId}`)
+        const { state, saveCreds } = await useMultiFileAuthState(authDir)
 
         const sock = makeWASocket({
             logger: this.logger,
@@ -74,10 +77,11 @@ export class Session {
             markOnlineOnConnect: true,
             shouldSyncHistoryMessage: () => true,
             cachedGroupMetadata: async (jid) => this.groupCache.get(jid)
-        });
+        })
 
-        this.sock = sock;
-        sock.ev.on('creds.update', saveCreds);
+        this.sock = sock
+
+        sock.ev.on('creds.update', saveCreds)
 
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update
@@ -89,19 +93,30 @@ export class Session {
                 updatedAt: Date.now()
             })
 
+            this.managerEmitter.emit('connection', { sessionId: sessionId, data: 'connecting' })
+
             if (qr) {
-                if (printQRInTerminal) qrcode.generate(qr, { small: true })
-                this.emitter.emit('qr', { id: sessionId, qr })
+                if (printQRInTerminal) QRCodeTerminal.generate(qr, { small: true })
+                try {
+                    const imageBase64 = await QRCode.toDataURL(qr, {
+                        errorCorrectionLevel: 'H',
+                        scale: 8,
+                        margin: 2
+                    })
+                    this.managerEmitter.emit('qr', { sessionId: sessionId, data: imageBase64 })
+                } catch (err) { console.error(`[err] erro ao gerar qr ${err}`) }
             }
 
             if (connection === 'open') {
                 this.logger.info({ sessionId }, 'Sessão conectada com sucesso')
                 this.insecureTried.delete(sessionId)
+                this.managerEmitter.emit('connection', { sessionId: sessionId, data: 'open' })
             }
 
             if (connection === 'close') {
                 const errMessage = lastDisconnect?.error?.message || ''
                 const code = this._extractDisconnectCode(lastDisconnect?.error)
+                this.managerEmitter.emit('connection', { sessionId: sessionId, data: 'closed' })
 
                 const isRestarting = code === 515
 
@@ -149,6 +164,7 @@ export class Session {
             // if (event.type !== 'notify') return
 
             for (const m of event.messages) {
+                this.managerEmitter.emit('message', { sessionId: sessionId, data: m })
                 console.log(`[message] ${m.pushName}`)
                 const chatJid = m.key.remoteJid;
                 if (!m.message) continue;
@@ -210,22 +226,32 @@ export class Session {
                     }
                 }
 
-                this.emitter.emit('new_message', {
-                    sessionId: this.id,
-                    ...novaMensagem
-                })
+                // this.managerEmitter.emit('message', {
+                //     sessionId: this.id,
+                //     ...novaMensagem
+                // })
             }
         })
 
-        sock.ev.on('lid-mapping.update', (mappings) => {
+        sock.ev.on('lid-mapping.update', (mappings) => { 
             console.log(`[mappings] ${mappings}`)
+            this.managerEmitter.emit('mappings')
         })
 
-        sock.ev.on('presence.update', (presence) => { console.log(`[presence] ${JSON.stringify(presence)}`) })
+        sock.ev.on('presence.update', (presence) => { 
+            console.log(`[presence] ${JSON.stringify(presence)}`)
+            this.managerEmitter.emit('presence')
+        })
 
-        sock.ev.on('chats.update', (chatsUpdate) => { console.log(`[chats update] ${JSON.stringify(chatsUpdate)}`) })
+        sock.ev.on('chats.update', (chatsUpdate) => { 
+            console.log(`[chats update] ${JSON.stringify(chatsUpdate)}`)
+            this.managerEmitter.emit('chats')
+        })
 
-        sock.ev.on('contacts.upsert', (contactsUpsert) => { console.log(`[contacts upsert] ${JSON.stringify(contactsUpsert)}`) })
+        sock.ev.on('contacts.upsert', (contactsUpsert) => { 
+            console.log(`[contacts upsert] ${JSON.stringify(contactsUpsert)}`)
+            this.managerEmitter.emit('contacts')
+        })
 
         sock.ev.on('groups.update', async (updates) => {
             for (const update of updates) {

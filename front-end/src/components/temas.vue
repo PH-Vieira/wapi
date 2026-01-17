@@ -9,7 +9,7 @@ const colorsStore = useColorsStore()
     <div class="absolute top-0 left-5 flex gap-0 items-start">
         <div v-for="color in colorsStore.colors" :key="color.name" class="relative group">
             <!-- O "Corpo" da aba que desce com a cor do tema -->
-            <div class="relative pt-20 px-4 pb-3 rounded-b-full flex flex-col items-center transition-colors"
+            <div class="relative pt-2 px-2 pb-3 rounded-b-full flex flex-col items-center transition-colors"
                 :style="{ backgroundColor: color.from }">
 
                 <button @click="colorsStore.setActiveColor(color.name)"

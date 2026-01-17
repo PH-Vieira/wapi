@@ -10,7 +10,7 @@ const props = defineProps({
 })
 
 const managerStore = useManagerStore()
-const jid_selecionado = ref(null)
+const chat_selecionado = ref(null)
 const nome_chat_ativo = ref(null)
 const img_selecionada = ref(null)
 const chatContainer = ref(null)
@@ -19,19 +19,22 @@ const mediaRecorder = ref(null);
 const audioChunks = ref([]);
 const colorsStore = useColorsStore()
 
-watch(jid_selecionado, async () => {
+watch(chat_selecionado, async () => {
     await nextTick()
     scrollToBottom()
 })
 
 const lista_chats = computed(() => {
-    const sessaoData = managerStore.messagesByChat[props.session_id]
-    return sessaoData ? Object.keys(sessaoData) : []
+    return managerStore.getChatsBySession(props.session_id)
+})
+
+const messages = computed(() => {
+    return managerStore.getMessages(props.session_id, chat_selecionado.value)
 })
 
 const mensagens_ativas = computed(() => {
-    if (!jid_selecionado.value || !props.session_id) return []
-    return managerStore.messagesByChat[props.session_id]?.[jid_selecionado.value] || []
+    if (!chat_selecionado.value || !props.session_id) return []
+    return managerStore.messagesByChat[props.session_id]?.[chat_selecionado.value] || []
 })
 
 const wallpapers = {
@@ -39,7 +42,7 @@ const wallpapers = {
     'default': 'user-images.githubusercontent.com'
 }
 
-const wallpaperAtivo = computed(() => wallpapers[jid_selecionado.value] || wallpapers.default)
+const wallpaperAtivo = computed(() => wallpapers[chat_selecionado.value] || wallpapers.default)
 
 const lista_chats_detalhada = computed(() => {
     const sessaoData = managerStore.messagesByChat[props.session_id] || {}
@@ -56,28 +59,28 @@ const lista_chats_detalhada = computed(() => {
     })
 })
 
-const processarMensagens = computed(() => {
-    const raw = managerStore.messagesByChat[props.session_id]?.[jid_selecionado.value] || []
+// const processarMensagens = computed(() => {
+//     const raw = managerStore.messagesByChat[props.session_id]?.[chat_selecionado.value] || []
 
-    const mapaReacoes = raw.reduce((acc, msg) => {
-        if (msg.text.startsWith('[reaction]')) {
-            const emoji = msg.text.match(/emoji=([^ ]+)/)?.[1]
-            const targetId = msg.text.match(/targetKeyId=([^ ]+)/)?.[1]
-            if (targetId && emoji) {
-                if (!acc[targetId]) acc[targetId] = {}
-                acc[targetId][msg.pushName] = emoji
-            }
-        }
-        return acc
-    }, {})
+//     const mapaReacoes = raw.reduce((acc, msg) => {
+//         if (msg.text.startsWith('[reaction]')) {
+//             const emoji = msg.text.match(/emoji=([^ ]+)/)?.[1]
+//             const targetId = msg.text.match(/targetKeyId=([^ ]+)/)?.[1]
+//             if (targetId && emoji) {
+//                 if (!acc[targetId]) acc[targetId] = {}
+//                 acc[targetId][msg.pushName] = emoji
+//             }
+//         }
+//         return acc
+//     }, {})
 
-    return raw
-        .filter(msg => !msg.text.startsWith('[reaction]'))
-        .map(msg => ({
-            ...msg,
-            reacoes: mapaReacoes[msg.id] || null
-        }))
-})
+//     return raw
+//         .filter(msg => !msg.text.startsWith('[reaction]'))
+//         .map(msg => ({
+//             ...msg,
+//             reacoes: mapaReacoes[msg.id] || null
+//         }))
+// })
 
 watch(mensagens_ativas, async () => {
     if (!chatContainer.value) return
@@ -108,14 +111,14 @@ const novoTexto = ref('')
 
 const enviarMensagem = async () => {
 
-    if (!novoTexto.value.trim() || !jid_selecionado.value) return
+    if (!novoTexto.value.trim() || !chat_selecionado.value) return
 
     const textoParaEnviar = novoTexto.value
     novoTexto.value = '' // Limpa o campo imediatamente
 
     const sucesso = await managerStore.sendMessage(
         props.session_id,
-        jid_selecionado.value,
+        chat_selecionado.value,
         textoParaEnviar
     )
 
@@ -136,46 +139,46 @@ const handleKeyPress = (e) => {
 
 }
 
-// 1. Enviar Arquivo (Imagem/Áudio pronto)
-const handleFileUpload = async (event) => {
+// // 1. Enviar Arquivo (Imagem/Áudio pronto)
+// const handleFileUpload = async (event) => {
 
-    const file = event.target.files[0];
-    if (!file) return;
+//     const file = event.target.files[0];
+//     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-        await managerStore.sendMessage(props.session_id, jid_selecionado.value, '', reader.result, file.type);
-    };
-    reader.readAsDataURL(file);
+//     const reader = new FileReader();
+//     reader.onload = async () => {
+//         await managerStore.sendMessage(props.session_id, chat_selecionado.value, '', reader.result, file.type);
+//     };
+//     reader.readAsDataURL(file);
 
-};
+// };
 
-// 2. Gravar Áudio
-const toggleGravacao = async () => {
+// // 2. Gravar Áudio
+// const toggleGravacao = async () => {
 
-    if (!isGravando.value) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder.value = new MediaRecorder(stream);
-        audioChunks.value = [];
+//     if (!isGravando.value) {
+//         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+//         mediaRecorder.value = new MediaRecorder(stream);
+//         audioChunks.value = [];
 
-        mediaRecorder.value.ondataavailable = (e) => audioChunks.value.push(e.data);
-        mediaRecorder.value.onstop = async () => {
-            const blob = new Blob(audioChunks.value, { type: 'audio/ogg; codecs=opus' });
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                managerStore.sendMessage(props.session_id, jid_selecionado.value, '', reader.result, 'audio/ogg', true);
-            };
-            reader.readAsDataURL(blob);
-        };
+//         mediaRecorder.value.ondataavailable = (e) => audioChunks.value.push(e.data);
+//         mediaRecorder.value.onstop = async () => {
+//             const blob = new Blob(audioChunks.value, { type: 'audio/ogg; codecs=opus' });
+//             const reader = new FileReader();
+//             reader.onloadend = () => {
+//                 managerStore.sendMessage(props.session_id, chat_selecionado.value, '', reader.result, 'audio/ogg', true);
+//             };
+//             reader.readAsDataURL(blob);
+//         };
 
-        mediaRecorder.value.start();
-        isGravando.value = true;
-    } else {
-        mediaRecorder.value.stop();
-        isGravando.value = false;
-    }
+//         mediaRecorder.value.start();
+//         isGravando.value = true;
+//     } else {
+//         mediaRecorder.value.stop();
+//         isGravando.value = false;
+//     }
 
-};
+// };
 </script>
 
 <template>
@@ -190,35 +193,35 @@ const toggleGravacao = async () => {
                 Conversas
             </div>
 
-            <div v-for="chat in lista_chats_detalhada" :key="chat.jid"
-                @click="jid_selecionado = chat.jid; nome_chat_ativo = chat.nome"
+            <div v-for="chat in lista_chats" :key="chat.id"
+                @click="chat_selecionado = chat.id; nome_chat_ativo = chat.id"
                 class="p-3 flex items-center gap-3 cursor-pointer border-b transition-all bg-hover"
-                :class="{ 'active-chat border-l-4': jid_selecionado === chat.jid }" :style="{
+                :class="{ 'active-chat border-l-4': chat_selecionado === chat.jid }" :style="{
                     borderColor: colorsStore.getActiveColor.from_800,
-                    backgroundColor: jid_selecionado === chat.jid ? colorsStore.getActiveColor.from_500_50 : '',
+                    backgroundColor: chat_selecionado === chat.id ? colorsStore.getActiveColor.from_500_50 : '',
                     '--bg-hover': colorsStore.getActiveColor.from_400,
                     borderLeftColor: colorsStore.getActiveColor.to_500
                 }">
                 <div class="p-2 shrink-0" :style="{
-                    backgroundColor: colorsStore.getActiveColor.from_800,
+                    backgroundColor: chat_selecionado === chat.id ? colorsStore.getActiveColor.from_500_50 : '',
                     color: colorsStore.getActiveColor.from_400
                 }">
-                    <component :is="chat.jid.includes('@g.us') ? Users : User" :size="24" />
+                    <component :is="chat.id.includes('@g.us') ? Users : User" :size="24" />
                 </div>
 
                 <div class="flex-1 min-w-0">
                     <div class="flex justify-between items-center mb-0.5">
                         <p class="text-sm font-bold truncate pr-2" :style="{
                             color: colorsStore.getActiveColor.to_100
-                        }">{{ chat.nome }}</p>
+                        }">{{ chat.id }}</p>
                         <span class="text-[10px] shrink-0" :style="{
                             color: colorsStore.getActiveColor.from_300
-                        }">{{ chat.horario }}</span>
+                        }">{{ chat.timestamp }}</span>
                     </div>
                     <p class="text-xs truncate italic" :style="{
                         color: colorsStore.getActiveColor.from_200
                     }">
-                        {{ `${chat.nome}: ${chat.ultimaMensagem}` }}
+                        {{ `${chat.pushName}: ${chat.lastMessage.text}` }}
                     </p>
                 </div>
             </div>
@@ -228,7 +231,8 @@ const toggleGravacao = async () => {
         <main class="flex-1 flex flex-col relative min-w-0" :style="{
             backgroundColor: colorsStore.getActiveColor.from_900_50
         }">
-            <template v-if="jid_selecionado">
+        {{ managerStore.messages }}
+            <template v-if="chat_selecionado">
                 <!-- Header -->
                 <div class="p-3 border-b flex items-center gap-3 z-10 shadow-lg" :style="{
                     backgroundColor: colorsStore.getActiveColor.from_900,
@@ -237,7 +241,7 @@ const toggleGravacao = async () => {
                     <div :style="{
                         color: colorsStore.getActiveColor.from_400
                     }">
-                        <component :is="jid_selecionado.includes('@g.us') ? Users : User" />
+                        <component :is="chat_selecionado.includes('@g.us') ? Users : User" />
                     </div>
                     <div class="flex flex-col">
                         <span class="font-bold text-sm" :style="{
@@ -258,13 +262,14 @@ const toggleGravacao = async () => {
                         backgroundPosition: 'center'
                     }">
 
-                    <div v-for="msg in processarMensagens" :key="msg.id"
+                    <div v-for="msg in messages" :key="msg.id"
                         :class="['max-w-[75%] p-2.5 rounded-lg text-sm shadow-md relative mb-2 wrap-break-words transition-all hover:shadow-lg',
                             msg.fromMe ? 'self-end rounded-tr-none text-white' : 'self-start rounded-tl-none text-gray-100 border border-white/5']" :style="{
                                 backgroundColor: msg.fromMe ? colorsStore.getActiveColor.to_600 : colorsStore.getActiveColor.from_900
                             }">
+                            {{ msg }}
 
-                        <p v-if="jid_selecionado.includes('@g.us') && !msg.fromMe"
+                        <p v-if="true"
                             class="text-[11px] font-black mb-1 flex items-center gap-1" :style="{
                                 color: colorsStore.getActiveColor.to_400
                             }">

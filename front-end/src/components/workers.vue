@@ -45,6 +45,8 @@ watch(() => managerStore.sessions, (novasSessões) => {
                 v-for="session in managerStore.sessions" :key="session.id"
                 @click="session.status === 'open' ? chat_sessao_id = session.id : null">
 
+                <p class="wrap-break-word max-w-[25%]">{{ Object.keys(session) }}</p>
+
                 <!-- Gato do Status HTTP -->
                 <!-- <div class="w-32 h-32 shrink-0 bg-slate-800 rounded border border-slate-600">
                     <img :src="`https://http.cat/${session.httpStatus || 404}`" :alt="`Status ${session.httpStatus}`"
@@ -54,30 +56,30 @@ watch(() => managerStore.sessions, (novasSessões) => {
                 <div class="grow">
                     <div class="font-bold"
                     :style="{ color: colorsStore.getActiveColor.from_300 }">{{ session.id }}</div>
-                    <div class="text-xs uppercase opacity-70">Status: {{ session.status }}</div>
+                    <div class="text-xs uppercase opacity-70">Status: {{ managerStore.getSessionInfo(session.id).status }}</div>
                     <!-- <div class="text-xs font-mono">HTTP: {{ session.httpStatus || '---' }}</div> -->
                 </div>
 
                 <!-- botoes de controle -->
                 <div class="flex gap-2">
-                    <button @click.stop="togglePooling(session.id)" :class="[
+                    <!-- <button @click.stop="togglePooling(session.id)" :class="[
                         'cursor-pointer px-3 py-1 rounded transition-colors bg-emerald-500 hover:bg-emerald-400 outline-offset-2 outline-emerald-500 hover:outline-1'
                     ]">
                         {{ managerStore.pooling_intervals[session.id] ? 'Parar' : 'Monitorar' }}
-                    </button>
+                    </button> -->
 
-                    <button v-if="!session.qrCode && session.status !== 'open'"
+                    <button v-if="managerStore.getSessionInfo(session.id).status != 'open'"
                         @click.stop="managerStore.conectar(session.id)"
-                        :disabled="managerStore.connecting_sessions[session.id]"
+                        :disabled="managerStore.getSessionInfo(session.id).status == 'connecting'"
                         class="cursor-pointer px-3 py-1 bg-sky-500  hover:bg-sky-400 outline-sky-500 outline-offset-2 hover:outline-1 rounded flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                         <!-- Ícone de Loading com animação animate-spin -->
-                        <Loader2 v-if="managerStore.connecting_sessions[session.id]"
+                        <Loader2 v-if="managerStore.getSessionInfo(session.id).status == 'connecting'"
                             class="cursor-pointer w-4 h-4 animate-spin" />
-                        <span>{{ managerStore.connecting_sessions[session.id] ? 'Conectando...' : 'Conectar' }}</span>
+                        <span>{{ managerStore.getSessionInfo(session.id).status !== 'open' && !!managerStore.getSessionInfo(session.id).qrCode ? 'Conectando...' : 'Conectar' }}</span>
                     </button>
 
                     <!-- QR Code Modal ou Miniatura -->
-                    <div v-if="session.qrCode && session.status !== 'open'" @click.stop="id_selecionado = session.id"
+                    <div v-if="managerStore.getSessionInfo(session.id).qrCode && managerStore.getSessionInfo(session.id).status != 'open'" @click.stop="id_selecionado = session.id"
                         class="cursor-pointer text-black bg-white p-2 rounded shadow-lg">
                         <p>Clique para ver o QR!</p>
                     </div>
@@ -113,7 +115,7 @@ watch(() => managerStore.sessions, (novasSessões) => {
             </div>
         </Teleport>
         <Teleport to="body">
-            <div v-if="id_selecionado" class="fixed inset-0 bg-black/80 flex items-center justify-center z-222 p-4"
+            <div v-if="id_selecionado && managerStore.getSessionInfo(id_selecionado).status != 'open'" class="fixed inset-0 bg-black/80 flex items-center justify-center z-222 p-4"
                 @click="id_selecionado = null">
                 <Qr_modal @click.stop :session_id="id_selecionado" />
             </div>

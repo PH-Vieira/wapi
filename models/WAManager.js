@@ -17,32 +17,32 @@ export class WAManager {
     async createSession(sessionId) {
         if (this.sessions.has(sessionId)) { return this.sessions.get(sessionId) }
 
-        const session = new Session(sessionId)
+        const session = new Session(sessionId, this.emitter)
 
-        session.emitter.on('qr', async ({ id, qr }) => {
-            this.emitter.emit('qr', { sessionId: id, qr })
-            const image = await QRCode.toDataURL(qr, {
-                errorCorrectionLevel: 'H',
-                scale: 8,
-                margin: 2
-            })
-            this.qrCodes.set(id, image)
-        })
+        // session.emitter.on('qr', async ({ id, qr }) => {
+        //     this.emitter.emit('qr', { sessionId: id, qr })
+        //     const image = await QRCode.toDataURL(qr, {
+        //         errorCorrectionLevel: 'H',
+        //         scale: 8,
+        //         margin: 2
+        //     })
+        //     this.qrCodes.set(id, image)
+        // })
 
-        session.emitter.on('connection.update', (data) => {
-            this._recomputeStatus()
+        // session.emitter.on('connection.update', (data) => {
+        //     this._recomputeStatus()
 
-            if (data.connection === 'close') {
-                console.log(`[MANAGER] Limpando dados da sessão ${data.sessionId} por fechamento.`);
-                this.qrCodes.delete(data.sessionId);
-            }
+        //     if (data.connection === 'close') {
+        //         console.log(`[MANAGER] Limpando dados da sessão ${data.sessionId} por fechamento.`);
+        //         this.qrCodes.delete(data.sessionId);
+        //     }
 
-            this.emitter.emit('connection.update', data)
-        })
+        //     this.emitter.emit('connection.update', data)
+        // })
 
-        session.emitter.on('new_message', (data) => {
-            this.emitter.emit('new_message', data)
-        })
+        // session.emitter.on('new_message', (data) => {
+        //     this.emitter.emit('new_message', data)
+        // })
 
         this.sessions.set(sessionId, session)
 
@@ -52,7 +52,7 @@ export class WAManager {
             console.log(`[ERROR] Falha ao persistir dados: ${err.message}`)
         }
 
-        this.emitter.emit('sessionCreated', { sessionId })
+        // this.emitter.emit('sessionCreated', { sessionId })
 
         console.log(`[INFO] WAManager: sessao ${sessionId} criada e persistida`)
         return session
@@ -61,7 +61,7 @@ export class WAManager {
     async connectSession(sessionId) {
         const session = this.sessions.get(sessionId)
         if (!session) {
-            session = await this.createSession(sessionId)
+            session = await this.createSession(sessionId, this.emitter)
         }
         session.manualDisconnect.delete(sessionId)
         session.insecureTried.delete(sessionId)
@@ -146,7 +146,7 @@ export class WAManager {
             for (const persisted_session of data.sessions) {
                 if (!this.sessions.has(persisted_session.id)) {
                     console.log(`[RECOVERY] Restaurando sessao do arquivo: ${persisted_session.id}`)
-                    await this.createSession(persisted_session.id)
+                    await this.createSession(persisted_session.id, this.emitter)
                 }
             }
         } catch (err) {

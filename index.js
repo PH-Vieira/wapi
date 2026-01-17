@@ -47,7 +47,7 @@ function broadcast(obj) {
 app.get('/', (req, res) => {
     console.log('[INFO] GET /')
     res.set('X-Created-By', 'amogus?')
-    return res.status(214)
+    return res.status(214).json('ok')
 })
 
 app.get('/sessions', async (req, res) => {
@@ -223,26 +223,38 @@ const manager = WAManager.getInstance()
 app.locals.manager = manager
 await manager.createSession('default')
 
-manager.emitter.on('qr', ({ sessionId }) => {
-    const img = manager.qrCodes.get(sessionId);
-    if (img) broadcast({ type: 'qr', sessionId, qr: img });
+const eventsToForward = ['connection', 'qr', 'message', 'mappings', 'presence', 'chats', 'contacts']
+
+eventsToForward.forEach(eventType => {
+    manager.emitter.on(eventType, (payload) => {
+        broadcast({
+            type: eventType,
+            sessionId: payload?.sessionId || 'teste',
+            data: payload?.data || 'teste'
+        })
+    })
 })
 
-manager.emitter.on('connection.update', (payload) => {
-    broadcast({ type: 'connection.update', ...payload })
-})
+// manager.emitter.on('qr', ({ sessionId }) => {
+//     const img = manager.qrCodes.get(sessionId);
+//     if (img) broadcast({ type: 'qr', sessionId, data: img });
+// })
 
-manager.emitter.on('statusChanged', ({ status }) => {
-    broadcast({ type: 'status', status })
-})
+// manager.emitter.on('connection.update', (payload) => {
+//     broadcast({ type: 'connection.update', ...payload })
+// })
 
-manager.emitter.on('error', ({ sessionId, error }) => {
-    broadcast({ type: 'error', sessionId, message: String(error) })
-})
+// manager.emitter.on('statusChanged', ({ status }) => {
+//     broadcast({ type: 'status', data: status })
+// })
 
-manager.emitter.on('message', (payload) => {
-    broadcast({ type: 'message', ...payload })
-})
+// manager.emitter.on('error', ({ sessionId, error }) => {
+//     broadcast({ type: 'error', sessionId, data: String(error) })
+// })
+
+// manager.emitter.on('message', (payload) => {
+//     broadcast({ type: 'message', ...payload })
+// })
 
 server.listen(PORT, () => {
     console.log(`[INFO] API+WS rodando em http://localhost:${PORT}`)

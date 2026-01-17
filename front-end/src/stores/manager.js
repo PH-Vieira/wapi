@@ -4,6 +4,8 @@ import api from '../services/api'
 export const useManagerStore = defineStore('manager', {
     state: () => ({
         sessions: [],
+        socket: null,
+        messages: {},
         pooling_intervals: {},
         connecting_sessions: {},
         session_pooling_interval: 2000,
@@ -12,7 +14,166 @@ export const useManagerStore = defineStore('manager', {
         jidMestre: {},
         messagesByChat: {}
     }),
+    getters: {
+        getSessionInfo: (state) => {
+            return (sessionId) => {
+                const session = state.sessions.find(s => s.id === sessionId)
+                return session || {}
+            }
+        },
+        getChatsBySession: (state) => {
+            return (sessionId) => {
+                const sessionMessages = state.messages[sessionId]
+                if (!sessionMessages) return []
+
+                // Transforma o objeto de IDs em um array de objetos para o v-for
+                return Object.keys(sessionMessages).map(chatId => {
+                    const history = sessionMessages[chatId]
+                    const lastMsg = history[history.length - 1]
+
+                    return {
+                        id: chatId,
+                        lastMessage: lastMsg?.text || '',
+                        timestamp: new Date(lastMsg.timestamp * 1000).toLocaleTimeString('pt-BR').slice(0, 5),
+                        pushName: lastMsg?.pushName || 'Desconhecido',
+                        messageCount: history.length,
+                        raw: lastMsg
+                    };
+                }).sort((a, b) => b.timestamp - a.timestamp)
+            }
+        },
+        getMessages: (state) => (sessionId, chatId) => {
+            console.log(sessionId, chatId)
+            const chat = state.messages[sessionId]?.[chatId]
+            if (!chat) return []
+            return chat.map(msg => ({
+                ...msg,
+                time: new Date(msg.timestamp * 1000).toLocaleTimeString('pt-BR').slice(0, 5)
+            }))
+        }
+    },
     actions: {
+        initSocket() {
+            if (this.socket) return
+            this.socket = new WebSocket('ws://localhost:3000')
+            this.socket.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data)
+                    const { type, data, sessionId } = payload
+
+                    const session = this.sessions.find(s => s.id === sessionId)
+
+                    console.log(`[pinia] evento recebido: ${type} on ${sessionId}`)
+
+                    switch (type) {
+                        case 'qr':
+                            session.qrCode = data
+                            break;
+
+                        case 'connection':
+                            session.status = data
+                            break
+
+                        case 'message':
+                            console.log(data)
+                            if (!this.messages[sessionId]) { this.messages[sessionId] = {} }
+
+                            const message = this.parseMessage(data.message)
+                            console.log(message)
+
+                            const fromMe = data?.key?.fromMe
+
+                            let chatId
+                            if (fromMe && message.type == 'text') {
+                                chatId = data?.key?.remoteJid || 'unknown'
+                            } else if (fromMe) {
+                                // chatId = data?.key?.remoteJidAlt || 'unknown'
+                                const aux = this.findMessageById(message?.data?.key?.id)
+                                if (aux?.chatId) { chatId = aux?.chatId }
+                            } else {
+                                // -----------------------------------------------------------------
+                                // Implementar historico de mensagens para evitar nao saber o nome
+                                // do contato quando vc envia a primeira mensagem
+                                // -----------------------------------------------------------------
+                                // chatId = data?.key?.remoteJidAlt || 'unknown'
+                                chatId = data?.pushName || data?.key?.remoteJidAlt || 'unknown'
+                            }
+
+                            if (!this.messages[sessionId][chatId]) { this.messages[sessionId][chatId] = [] }
+
+                            this.messages[sessionId][chatId].push({
+                                id: data.key.id,
+                                fromMe: data.key.fromMe,
+                                pushName: data.pushName,
+                                type: message.type,
+                                text: message.data,
+                                timestamp: data.messageTimestamp,
+                            })
+                            break
+
+                        default:
+                            break;
+                    }
+                } catch (err) { console.log(`[pinia err] ${err}`) }
+            }
+            this.socket.onopen = () => console.log('[pinia] WebSocket conectado com sucesso')
+            this.socket.onerror = (error) => console.error('[pinia] Erro de conexão WebSocket', error)
+            this.socket.onclose = () => {
+                console.warn('[pinia] WebSocket fechado. Tentando reconectar...')
+                this.socket = null
+                setTimeout(() => this.initSocket(), 1000)
+            }
+        },
+
+        parseMessage(message) {
+            if (!message) return
+
+            if (message.conversation) { return { type: 'text', data: message.conversation } }
+            if (message.reactionMessage) { return { type: 'reaction', data: message.reactionMessage } }
+            return { type: 'other', text: 'mensagem nao suportada' }
+        },
+
+        findMessageById(messageId) {
+            for (const sessionId in this.messages) {
+                const session = this.messages[sessionId]
+
+                for (const chatId in session) {
+                    const chat = session[chatId]
+
+                    const msg = chat.find(m => m.id === messageId)
+                    if (msg) return { msg, sessionId, chatId }
+                }
+            }
+            return null
+        },
+
+        formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000)
+            const now = new Date()
+
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+            const yesterday = new Date(today)
+            yesterday.setDate(yesterday.getDate() - 1)
+
+            const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+            if (messageDate.getTime() === today.getTime()) {
+                return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+            }
+
+            if (messageDate.getTime() === yesterday.getTime()) {
+                return 'Ontem'
+            }
+
+            const diffDays = Math.floor((today - messageDate) / (1000 * 60 * 60 * 24))
+            if (diffDays < 7) {
+                return date.toLocaleDateString('pt-BR', { weekday: 'long' })
+                    .split('-')[0]
+            }
+
+            return date.toLocaleDateString('pt-BR')
+        },
+
         async getSessions() {
             try {
                 const res = await api.get('/sessions')
@@ -64,14 +225,14 @@ export const useManagerStore = defineStore('manager', {
 
         // LIGA o pooling individualmente
         startPooling(sessionId) {
-            if (this.pooling_intervals[sessionId]) return // Já está ativo
+            // if (this.pooling_intervals[sessionId]) return // Já está ativo
 
-            // console.log(`[POOLING] Iniciado: ${sessionId}`)
-            this.getSession(sessionId) // Executa a primeira vez imediato
+            // // console.log(`[POOLING] Iniciado: ${sessionId}`)
+            // this.getSession(sessionId) // Executa a primeira vez imediato
 
-            this.pooling_intervals[sessionId] = setInterval(() => {
-                this.getSession(sessionId)
-            }, this.session_pooling_interval)
+            // this.pooling_intervals[sessionId] = setInterval(() => {
+            //     this.getSession(sessionId)
+            // }, this.session_pooling_interval)
         },
 
         // DESLIGA o pooling individualmente
@@ -85,7 +246,7 @@ export const useManagerStore = defineStore('manager', {
 
         // LIGA o pooling para todas as sessões da lista
         startAllPoolings() {
-            this.sessions.forEach(s => this.startPooling(s.id))
+            // this.sessions.forEach(s => this.startPooling(s.id))
         },
 
         // DESLIGA todos os poolings ativos
@@ -95,19 +256,19 @@ export const useManagerStore = defineStore('manager', {
 
         async conectar(sessionId) {
             try {
-                this.connecting_sessions[sessionId] = true
+                // this.connecting_sessions[sessionId] = true
                 await api.post(`/sessions/${sessionId}/connect`)
-                this.startPooling(sessionId)
+                // this.startPooling(sessionId)
             } catch (err) {
                 console.log(`[ERROR] manager store: ${err}`)
-                delete this.connecting_sessions[sessionId]
+                // delete this.connecting_sessions[sessionId]
             }
         },
 
         async create_session(sessionId) {
             try {
                 await api.post(`/sessions/${sessionId}`)
-                await this.getSessions()
+                // await this.getSessions()
             } catch (err) {
                 console.log(`[ERROR] manager store: ${err}`)
             }
@@ -117,9 +278,9 @@ export const useManagerStore = defineStore('manager', {
             try {
                 await api.post(`/sessions/${sessionId}/disconnect`)
                 if (this.connecting_sessions[sessionId]) {
-                    delete this.connecting_sessions[sessionId]
+                    // delete this.connecting_sessions[sessionId]
                 }
-                await this.getSessions()
+                // await this.getSessions()
             } catch (err) {
                 console.log(`[ERROR] Erro ao desconectar: ${err}`)
             }
@@ -130,20 +291,20 @@ export const useManagerStore = defineStore('manager', {
 
             try {
                 await api.delete(`/sessions/${sessionId}`)
-                delete this.connecting_sessions[sessionId]
+                // delete this.connecting_sessions[sessionId]
                 this.sessions = this.sessions.filter(s => s.id !== sessionId)
             } catch (err) {
                 console.log(`[ERROR] Erro ao excluir: ${err}`)
             }
         },
 
-        async fetchMessages(sessionId, chatJid) {
-            try {
-                const res = await api.get(`/sessions/${sessionId}/chats/${chatJid}/messages`)
-                if (!this.chatMessages[sessionId]) this.chatMessages[sessionId] = {}
-                this.chatMessages[sessionId][chatJid] = res.data
-            } catch (err) { console.log(`[ERROR] Erro ao buscar mensagens: ${err}`) }
-        },
+        // async fetchMessages(sessionId, chatJid) {
+        //     try {
+        //         const res = await api.get(`/sessions/${sessionId}/chats/${chatJid}/messages`)
+        //         if (!this.chatMessages[sessionId]) this.chatMessages[sessionId] = {}
+        //         this.chatMessages[sessionId][chatJid] = res.data
+        //     } catch (err) { console.log(`[ERROR] Erro ao buscar mensagens: ${err}`) }
+        // },
 
         async sendMessage(sessionId, chatJid, text, media = null, mimetype = null, isPtt = false) {
             try {
